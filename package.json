@@ -1,0 +1,48 @@
+{
+  "name": "lux-opcua",
+  "version": "1.0.0",
+  "description": "Modern TypeScript OPC UA client library with subscription-based value mirroring",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test dist/test/*.js",
+    "demo": "node examples/demo.js",
+    "clean": "rimraf dist",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "opcua",
+    "typescript",
+    "industrial",
+    "automation",
+    "subscription",
+    "plc"
+  ],
+  "author": "Industrial Automation Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.13",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@types/ws": "^8.5.0"
+  },
+  "optionalDependencies": {
+    "ws": "^8.14.0"
+  },
+  "peerDependencies": {
+    "ws": "^8.14.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

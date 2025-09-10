@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>lux-opcua Browser Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .variables {
+            margin-top: 20px;
+        }
+        .variable {
+            padding: 8px;
+            margin: 5px 0;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+        .log {
+            height: 200px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 100px;
+            font-weight: bold;
+        }
+        input {
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 lux-opcua Browser Demo</h1>
+        <p>This demonstrates the lux-opcua library running in a web browser with the same API as Node.js!</p>
+        
+        <h2>Connection Settings</h2>
+        <div class="input-group">
+            <label for="host">Host:</label>
+            <input type="text" id="host" value="localhost" />
+        </div>
+        <div class="input-group">
+            <label for="port">Port:</label>
+            <input type="number" id="port" value="80" />
+        </div>
+        <div class="input-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" value="user" />
+        </div>
+        <div class="input-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="pass" />
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div id="status" class="status disconnected">Disconnected</div>
+
+        <h2>Variables</h2>
+        <div class="controls">
+            <button id="addVariableBtn" onclick="addVariable()" disabled>Add Temperature Variable</button>
+            <button id="readBtn" onclick="readVariable()" disabled>Read Temperature</button>
+            <button id="writeBtn" onclick="writeVariable()" disabled>Write Temperature (25.5)</button>
+        </div>
+
+        <div id="variables" class="variables">
+            <p>No variables configured</p>
+        </div>
+
+        <h2>Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <!-- Use ES modules for modern browsers -->
+    <script type="module">
+        import { OpcuaMachine } from './dist/index.js';
+
+        let machine = null;
+
+        function log(message) {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function updateStatus(state) {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+            statusElement.className = `status ${state}`;
+        }
+
+        function updateButtons(connected) {
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('addVariableBtn').disabled = !connected;
+            document.getElementById('readBtn').disabled = !connected;
+            document.getElementById('writeBtn').disabled = !connected;
+        }
+
+        window.connect = async function() {
+            try {
+                log('Creating OPC UA machine...');
+                
+                machine = new OpcuaMachine({
+                    host: document.getElementById('host').value,
+                    port: parseInt(document.getElementById('port').value),
+                    username: document.getElementById('username').value,
+                    password: document.getElementById('password').value
+                });
+
+                // Set up event handlers
+                machine.onConnectionStateChanged((state) => {
+                    log(`Connection state: ${state}`);
+                    updateStatus(state);
+                    updateButtons(state === 'connected');
+                });
+
+                machine.onError((error) => {
+                    log(`Error: ${error.message}`);
+                });
+
+                log('Connecting to OPC UA server...');
+                await machine.connect();
+                
+                log('✅ Connected successfully!');
+
+            } catch (error) {
+                log(`❌ Connection failed: ${error.message}`);
+                if (error.message.includes('fetch')) {
+                    log('💡 Note: Browser security may block requests to localhost from file:// URLs');
+                    log('💡 Try serving this page from a web server (e.g., python -m http.server)');
+                }
+            }
+        };
+
+        window.disconnect = async function() {
+            if (machine) {
+                try {
+                    log('Disconnecting...');
+                    await machine.disconnect();
+                    log('✅ Disconnected successfully');
+                    machine = null;
+                } catch (error) {
+                    log(`❌ Disconnect error: ${error.message}`);
+                }
+            }
+        };
+
+        window.addVariable = function() {
+            if (machine) {
+                try {
+                    log('Adding Temperature variable...');
+                    machine.setDefaultNamespace('ns=1;s=');
+                    machine.initCyclicRead('Temperature', (value) => {
+                        log(`🌡️ Temperature changed: ${value}°C`);
+                        updateVariableDisplay('Temperature', value);
+                    });
+                    log('✅ Temperature variable added to cyclic reading');
+                    
+                    // Update variables display
+                    const variablesDiv = document.getElementById('variables');
+                    variablesDiv.innerHTML = '<div class="variable">Temperature: <span id="tempValue">-</span>°C</div>';
+                    
+                } catch (error) {
+                    log(`❌ Failed to add variable: ${error.message}`);
+                }
+            }
+        };
+
+        window.readVariable = async function() {
+            if (machine) {
+                try {
+                    log('Reading Temperature variable...');
+                    const value = await machine.readVariable('Temperature');
+                    log(`📖 Temperature (explicit read): ${value}°C`);
+                    updateVariableDisplay('Temperature', value);
+                } catch (error) {
+                    log(`❌ Read failed: ${error.message}`);
+                }
+            }
+        };
+
+        window.writeVariable = async function() {
+            if (machine) {
+                try {
+                    log('Writing Temperature = 25.5...');
+                    await machine.writeVariable('Temperature', 25.5);
+                    log('✅ Temperature written successfully');
+                    
+                    // Also try direct property access
+                    log('Setting Temperature via direct property access...');
+                    machine.Temperature = 26.0;
+                    log('✅ Temperature set via property access');
+                    
+                } catch (error) {
+                    log(`❌ Write failed: ${error.message}`);
+                }
+            }
+        };
+
+        function updateVariableDisplay(name, value) {
+            const tempValueElement = document.getElementById('tempValue');
+            if (tempValueElement) {
+                tempValueElement.textContent = value;
+            }
+        }
+
+        // Initial setup
+        log('🌐 lux-opcua Browser Demo loaded');
+        log('💡 This demonstrates cross-platform compatibility!');
+        updateButtons(false);
+        updateStatus('disconnected');
+
+    </script>
+</body>
+</html>
