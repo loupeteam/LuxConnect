@@ -202,14 +202,8 @@ export class OpcuaClient {
    * Browse OPC UA nodes
    */
   public async browse(nodeId: string): Promise<any> {
-    const response = await this.connection.apiRequest('/opcua/browse', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: nodeId,
-        browseDirection: 0, // Forward
-        includeSubtypes: true,
-        maxResults: 100
-      })
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/references`, {
+      method: 'GET'
     });
 
     return await response.json();
@@ -219,12 +213,20 @@ export class OpcuaClient {
    * Read a node attribute
    */
   public async readAttribute(nodeId: string, attributeId: number): Promise<any> {
-    const response = await this.connection.apiRequest('/opcua/readValue', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: nodeId,
-        attributeId: attributeId
-      })
+    // Map attribute IDs to attribute names for mapp Connect
+    const attributeMap: { [key: number]: string } = {
+      13: 'Value',
+      14: 'DataType',
+      2: 'DisplayName',
+      3: 'Description',
+      15: 'AccessLevel',
+      16: 'UserAccessLevel'
+    };
+    
+    const attributeName = attributeMap[attributeId] || 'Value';
+    
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/${attributeName}`, {
+      method: 'GET'
     });
 
     return await response.json();

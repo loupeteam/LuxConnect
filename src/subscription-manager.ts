@@ -65,7 +65,7 @@ export class SubscriptionManager {
       publishingEnabled: true
     };
 
-    const response = await this.connection.apiRequest('/opcua/subscription', {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions`, {
       method: 'POST',
       body: JSON.stringify(subscriptionParams)
     });
@@ -101,7 +101,7 @@ export class SubscriptionManager {
     }
 
     // Delete subscription on server
-    await this.connection.apiRequest(`/opcua/subscription/${subscription.subscriptionId}`, {
+    await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}`, {
       method: 'DELETE'
     });
 
@@ -227,36 +227,41 @@ export class SubscriptionManager {
     const clientHandle = this.clientHandleCounter++;
 
     const monitoredItemParams = {
-      nodeId: nodeId,
-      attributeId: 13, // Value attribute
-      samplingInterval: options.samplingInterval || 1000,
-      discardOldest: options.discardOldest !== false,
-      queueSize: options.queueSize || 1,
-      clientHandle: clientHandle
+      itemToMonitor: {
+        nodeId: nodeId,
+        attribute: 'Value'
+      },
+      monitoringParameters: {
+        clientHandle: clientHandle,
+        samplingInterval: options.samplingInterval || 1000,
+        queueSize: options.queueSize || 1
+      },
+      timestampsToReturn: 'Both',
+      monitoringMode: 'Reporting'
     };
 
     const response = await this.connection.apiRequest(
-      `/opcua/subscription/${subscription.subscriptionId}/monitoredItems`, 
+      `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems`, 
       {
         method: 'POST',
-        body: JSON.stringify([monitoredItemParams])
+        body: JSON.stringify(monitoredItemParams)
       }
     );
 
     const results = await response.json();
     
-    if (!results || results.length === 0 || !results[0].monitoredItemId) {
+    if (!results || !results.monitoredItemId) {
       throw new Error(`Failed to create monitored item for ${nodeId}`);
     }
 
     const monitoredItemInfo: MonitoredItemInfo = {
-      monitoredItemId: results[0].monitoredItemId,
+      monitoredItemId: results.monitoredItemId,
       clientHandle: clientHandle,
       nodeId: nodeId,
       ...(variableName && { variableName })
     };
 
-    subscription.monitoredItems.set(results[0].monitoredItemId, monitoredItemInfo);
+    subscription.monitoredItems.set(results.monitoredItemId, monitoredItemInfo);
     this.clientHandleMap.set(clientHandle, monitoredItemInfo);
   }
 
@@ -282,7 +287,7 @@ export class SubscriptionManager {
 
     // Remove from server
     await this.connection.apiRequest(
-      `/opcua/subscription/${subscription.subscriptionId}/monitoredItems/${monitoredItemId}`, 
+      `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/${monitoredItemId}`, 
       {
         method: 'DELETE'
       }
@@ -311,14 +316,8 @@ export class SubscriptionManager {
 
       try {
         // Browse children
-        const response = await this.connection.apiRequest('/opcua/browse', {
-          method: 'POST',
-          body: JSON.stringify({
-            nodeId: nodeId,
-            browseDirection: 0, // Forward
-            includeSubtypes: true,
-            maxResults: 100
-          })
+        const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/references`, {
+          method: 'GET'
         });
 
         const result = await response.json();

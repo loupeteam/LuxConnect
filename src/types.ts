@@ -37,6 +37,9 @@ export interface MonitoredItemOptions {
 export interface ConnectionConfig {
   host: string;
   port?: number;
+  protocol?: 'http' | 'https';         // HTTP protocol selection
+  wsProtocol?: 'ws' | 'wss';           // WebSocket protocol selection
+  endpointUrl?: string;                // OPC UA endpoint URL (optional, defaults to opc.tcp://host:4840)
   username?: string;
   password?: string;
   certificate?: string;
@@ -54,6 +57,8 @@ export interface SessionInfo {
   maxRequestMessageSize: number;
   maxResponseMessageSize: number;
   endpointUrl: string;
+  username?: string;                   // Optional username from authentication
+  roles?: string[];                    // Optional user roles from mapp Connect
 }
 
 /**

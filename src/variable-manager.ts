@@ -74,12 +74,8 @@ export class VariableManager {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
-    const response = await this.connection.apiRequest('/opcua/readValue', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: variable.nodeId,
-        attributeId: 13 // Value attribute
-      })
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(variable.nodeId)}/attributes/Value`, {
+      method: 'GET'
     });
 
     const result = await response.json();
@@ -107,15 +103,10 @@ export class VariableManager {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
-    const response = await this.connection.apiRequest('/opcua/writeValue', {
-      method: 'POST',
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(variable.nodeId)}/attributes/Value`, {
+      method: 'PUT',
       body: JSON.stringify({
-        nodeId: variable.nodeId,
-        attributeId: 13, // Value attribute
-        value: {
-          value: value,
-          type: this.inferDataType(value)
-        }
+        value: value
       })
     });
 
@@ -195,23 +186,15 @@ export class VariableManager {
    */
   private async readVariableInfo(nodeId: string): Promise<OpcuaVariable> {
     // Read value
-    const valueResponse = await this.connection.apiRequest('/opcua/readValue', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: nodeId,
-        attributeId: 13 // Value attribute
-      })
+    const valueResponse = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
+      method: 'GET'
     });
 
     const valueResult = await valueResponse.json();
     
     // Read data type
-    const dataTypeResponse = await this.connection.apiRequest('/opcua/readValue', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: nodeId,
-        attributeId: 14 // DataType attribute
-      })
+    const dataTypeResponse = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/DataType`, {
+      method: 'GET'
     });
 
     const dataTypeResult = await dataTypeResponse.json();
@@ -294,13 +277,4 @@ export class VariableManager {
   /**
    * Infer OPC UA data type from JavaScript value
    */
-  private inferDataType(value: any): number {
-    if (typeof value === 'boolean') return 1; // Boolean
-    if (typeof value === 'number') {
-      if (Number.isInteger(value)) return 6; // Int32
-      return 11; // Double
-    }
-    if (typeof value === 'string') return 12; // String
-    return 24; // BaseDataType (generic)
-  }
 }

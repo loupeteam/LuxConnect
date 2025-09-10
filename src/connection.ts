@@ -13,13 +13,18 @@ const isBrowser = typeof window !== 'undefined';
 class WebSocketManager {
   private ws: any = null;
 
-  create(url: string): void {
+  async create(url: string): Promise<void> {
     if (isBrowser) {
       this.ws = new WebSocket(url);
     } else {
-      // Import dynamically for Node.js
-      const { WebSocket } = require('ws');
-      this.ws = new WebSocket(url);
+      // Dynamic import for Node.js
+      try {
+        const wsModule = await import('ws');
+        const { WebSocket } = wsModule.default || wsModule;
+        this.ws = new WebSocket(url);
+      } catch (error) {
+        throw new Error('ws package not found. Install with: npm install ws');
+      }
     }
   }
 
@@ -85,12 +90,18 @@ export class OpcuaConnection {
 
   constructor(config: ConnectionConfig) {
     this.config = {
+      protocol: 'http',           // Default to HTTP
+      wsProtocol: 'ws',          // Default to WS
       enableWebSocket: true,
       keepAliveInterval: 20000, // 20 seconds (2/3 of typical 30s timeout)
       ...config
     };
     
-    this.baseUrl = `http://${this.config.host}:${this.config.port || 80}`;
+    const protocol = this.config.protocol || 'http';
+    const port = this.config.port || (protocol === 'https' ? 443 : 80);
+    this.baseUrl = `${protocol}://${this.config.host}:${port}`;
+    
+    console.log(`mapp Connect: Base URL = ${this.baseUrl}`);
   }
 
   /**
@@ -191,7 +202,10 @@ export class OpcuaConnection {
       throw new Error('Not connected to OPC UA server');
     }
 
-    const url = `${this.baseUrl}${endpoint}`;
+    // Ensure endpoint starts with /api/1.0 for mapp Connect
+    const normalizedEndpoint = endpoint.startsWith('/api/1.0') ? endpoint : `/api/1.0${endpoint}`;
+    const url = `${this.baseUrl}${normalizedEndpoint}`;
+    
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -229,6 +243,13 @@ export class OpcuaConnection {
     this.messageHandlers.push(handler);
   }
 
+  /**
+   * Test connection accessibility (public method for manual testing)
+   */
+  public async testConnection(): Promise<void> {
+    return this.testCertificate();
+  }
+
   // Private methods
 
   private setState(state: ConnectionState): void {
@@ -255,52 +276,303 @@ export class OpcuaConnection {
   }
 
   /**
-   * Test certificate (optional)
+   * Test connection to verify accessibility with detailed error handling
    */
   private async testCertificate(): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/opcua/testCertificate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        certificate: this.config.certificate || ''
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('Certificate test failed, continuing without certificate');
+    console.log('Testing mapp Connect accessibility...');
+    
+    const testUrl = `${this.baseUrl}/api/1.0/auth`;
+    
+    try {
+      console.log(`Testing endpoint: ${testUrl}`);
+      
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        mode: 'cors',
+        cache: 'no-cache'
+      });
+      
+      if (response.ok || response.status === 401 || response.status === 405) {
+        // 200 = OK, 401 = Unauthorized (but server accessible), 405 = Method Not Allowed (but endpoint exists)
+        console.log(`mapp Connect test successful: ${testUrl} (Status: ${response.status})`);
+        return;
+      } else {
+        console.warn(`mapp Connect endpoint returned HTTP ${response.status}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`mapp Connect endpoint failed: ${message}`);
+      throw this.categorizeConnectionError(error as Error, testUrl);
     }
   }
 
   /**
-   * Create OPC UA session
+   * Categorize connection errors for better diagnostics
+   */
+  private categorizeConnectionError(error: Error, url: string): Error {
+    const errorMsg = error.message.toLowerCase();
+    
+    if (errorMsg.includes('certificate') || errorMsg.includes('ssl') || errorMsg.includes('tls') || 
+        errorMsg.includes('authority') || errorMsg.includes('net::err_cert') || 
+        errorMsg.includes('sec_error') || errorMsg.includes('insecure')) {
+      return new Error(`Certificate/Authority Error for ${url}. 
+Please accept the server certificate by opening ${this.baseUrl} in your browser and accepting the security warning.`);
+    } else if (errorMsg.includes('failed to fetch') || errorMsg.includes('networkerror') || errorMsg.includes('network')) {
+      return new Error(`Network Error for ${url}. Check if the server is running and the URL is correct.`);
+    } else if (errorMsg.includes('cors')) {
+      return new Error(`CORS Error for ${url}. The server may not allow cross-origin requests.`);
+    } else {
+      return new Error(`Connection error for ${url}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create mapp Connect session with enhanced error handling
    */
   private async createSession(): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/opcua/session`, {
+    // Try session creation approach based on whether we have credentials
+    if (this.config.username) {
+      // If we have credentials, do the full auth flow
+      await this.createSessionWithAuth();
+    } else {
+      // For anonymous access, try direct session creation first
+      try {
+        await this.createSessionDirect();
+      } catch (error) {
+        console.log('Direct session creation failed, trying with anonymous auth:', error);
+        // If direct fails, try with anonymous auth
+        await this.createSessionWithAuth();
+      }
+    }
+  }
+
+  /**
+   * Create session directly (for anonymous access)
+   */
+  private async createSessionDirect(): Promise<void> {
+    const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
+    console.log(`Creating OPC UA session directly: ${sessionUrl}`);
+
+    const sessionRequest: any = {
+      url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
+      timeout: this.config.sessionTimeout || 30000
+    };
+
+    const sessionResponse = await fetch(sessionUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        username: this.config.username || '',
-        password: this.config.password || '',
-        sessionTimeout: this.config.sessionTimeout || 30000
-      })
+      mode: 'cors', // Explicit CORS handling
+      body: JSON.stringify(sessionRequest)
     });
 
-    if (!response.ok) {
-      throw new Error(`Session creation failed: ${response.status} ${response.statusText}`);
+    if (!sessionResponse.ok) {
+      const errorText = await sessionResponse.text();
+      throw new Error(`Direct session creation failed: ${sessionResponse.status} ${sessionResponse.statusText} - ${errorText}`);
     }
 
-    this.sessionInfo = await response.json();
+    const sessionData = await sessionResponse.json();
+    console.log('Direct OPC UA session created successfully');
+
+    this.sessionInfo = {
+      sessionId: sessionData.id,
+      sessionTimeout: sessionData.timeout || 30000,
+      maxRequestMessageSize: sessionData.maxRequestMessageSize || 65536,
+      maxResponseMessageSize: sessionData.maxResponseMessageSize || 65536,
+      endpointUrl: sessionData.url || sessionRequest.url,
+      username: 'anonymous',
+      roles: []
+    };
+
+    console.log('Direct session created:', {
+      sessionId: this.sessionInfo.sessionId,
+      timeout: this.sessionInfo.sessionTimeout,
+      endpointUrl: this.sessionInfo.endpointUrl
+    });
   }
 
   /**
-   * Delete OPC UA session
+   * Create session with authentication flow
+   */
+  private async createSessionWithAuth(): Promise<void> {
+    // Step 1: Authenticate and create client session
+    const authUrl = `${this.baseUrl}/api/1.0/auth`;
+    
+    console.log(`mapp Connect authentication: ${authUrl}`);
+    
+    try {
+      // Use GET with Basic auth for mapp Connect
+      let options: RequestInit;
+      
+      if (this.config.username) {
+        const credentials = btoa(`${this.config.username}:${this.config.password || ''}`);
+        options = {
+          method: 'GET',
+          headers: {
+            'Authorization': `Basic ${credentials}`
+          },
+          credentials: 'include', // Important for cookies
+          mode: 'cors' // Explicit CORS handling
+        };
+      } else {
+        // Anonymous access
+        options = {
+          method: 'GET',
+          credentials: 'include', // Important for cookies
+          mode: 'cors' // Explicit CORS handling
+        };
+      }
+
+      const authResponse = await fetch(authUrl, options);
+
+      if (!authResponse.ok) {
+        const errorText = await authResponse.text();
+        console.warn(`mapp Connect auth failed (${authResponse.status}): ${authResponse.statusText}`);
+        console.warn('Auth response:', errorText);
+        throw new Error(`${authResponse.status} ${authResponse.statusText} - ${errorText}`);
+      }
+
+      const authData = await authResponse.json();
+      console.log('mapp Connect authentication successful:', authData);
+
+      // Check if we have the necessary permissions
+      if (authData.roles && authData.roles.length > 0) {
+        console.log('User roles:', authData.roles);
+      } else {
+        console.log('No specific roles returned (may be anonymous or default access)');
+      }
+
+      // Step 2: Create OPC UA session
+      const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
+      console.log(`Creating OPC UA session: ${sessionUrl}`);
+
+      const sessionRequest: any = {
+        url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
+        timeout: this.config.sessionTimeout || 30000
+      };
+
+      // Add user credentials if provided
+      if (this.config.username) {
+        sessionRequest.userIdentityToken = {
+          username: this.config.username,
+          password: this.config.password || ''
+        };
+      }
+
+      const sessionResponse = await fetch(sessionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include', // Use the auth session cookies
+        mode: 'cors', // Explicit CORS handling
+        body: JSON.stringify(sessionRequest)
+      });
+
+      if (!sessionResponse.ok) {
+        const errorText = await sessionResponse.text();
+        console.warn(`OPC UA session creation failed (${sessionResponse.status}): ${sessionResponse.statusText}`);
+        console.warn('Session request was:', JSON.stringify(sessionRequest, null, 2));
+        console.warn('Session response:', errorText);
+        
+        // If it's a 403, it might be a permissions issue or CORS issue - try alternative approaches
+        if (sessionResponse.status === 403) {
+          console.log('403 error - could be CORS or permissions. Trying different approaches...');
+          
+          // Check if this might be a CORS issue by examining response headers
+          const corsHeaders = sessionResponse.headers.get('access-control-allow-origin');
+          if (!corsHeaders) {
+            console.warn('No CORS headers detected - this might be a CORS configuration issue');
+          }
+          
+          console.log('Trying direct session creation without userIdentityToken...');
+          
+          // Try without userIdentityToken (server-side anonymous)
+          const simpleRequest = {
+            url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
+            timeout: sessionRequest.timeout
+          };
+          
+          const retryResponse = await fetch(sessionUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            credentials: 'include',
+            mode: 'cors', // Explicit CORS handling
+            body: JSON.stringify(simpleRequest)
+          });
+          
+          if (retryResponse.ok) {
+            const retryData = await retryResponse.json();
+            console.log('Session created successfully without userIdentityToken');
+            
+            this.sessionInfo = {
+              sessionId: retryData.id,
+              sessionTimeout: retryData.timeout || 30000,
+              maxRequestMessageSize: retryData.maxRequestMessageSize || 65536,
+              maxResponseMessageSize: retryData.maxResponseMessageSize || 65536,
+              endpointUrl: retryData.url || simpleRequest.url,
+              username: authData.username || 'anonymous',
+              roles: authData.roles || []
+            };
+            
+            console.log('mapp Connect session created (anonymous OPC UA):', {
+              sessionId: this.sessionInfo.sessionId,
+              timeout: this.sessionInfo.sessionTimeout,
+              username: this.sessionInfo.username,
+              endpointUrl: this.sessionInfo.endpointUrl
+            });
+            return; // Success!
+          }
+          
+          throw new Error(`403 Forbidden - This could be a CORS issue or permission problem. 
+If this is a CORS issue, ensure the mapp Connect server has proper CORS headers configured for cross-origin requests.
+If this is a permission issue, the authenticated user may not have OPC UA access rights. 
+Auth data: ${JSON.stringify(authData)}`);
+        }
+        
+        throw new Error(`${sessionResponse.status} ${sessionResponse.statusText} - ${errorText}`);
+      }
+
+      const sessionData = await sessionResponse.json();
+      console.log('OPC UA session created successfully');
+
+      // Store the real session information
+      this.sessionInfo = {
+        sessionId: sessionData.id, // This is the numeric session ID from the server
+        sessionTimeout: sessionData.timeout || 30000,
+        maxRequestMessageSize: sessionData.maxRequestMessageSize || 65536,
+        maxResponseMessageSize: sessionData.maxResponseMessageSize || 65536,
+        endpointUrl: sessionData.url || sessionRequest.url,
+        username: authData.username || 'anonymous',
+        roles: authData.roles || []
+      };
+      
+      console.log('mapp Connect session created:', {
+        sessionId: this.sessionInfo.sessionId,
+        timeout: this.sessionInfo.sessionTimeout,
+        username: this.sessionInfo.username,
+        endpointUrl: this.sessionInfo.endpointUrl
+      });
+      
+    } catch (error) {
+      console.warn(`mapp Connect session creation error:`, error);
+      throw this.categorizeConnectionError(error as Error, authUrl);
+    }
+  }
+
+  /**
+   * Delete mapp Connect session
    */
   private async deleteSession(): Promise<void> {
-    await fetch(`${this.baseUrl}/opcua/session`, {
+    // Use the proper OPC UA session endpoint for deletion
+    const url = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo!.sessionId}`;
+    console.log(`Deleting mapp Connect session at: ${url}`);
+    
+    await fetch(url, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${this.sessionInfo!.sessionId}`
@@ -309,7 +581,7 @@ export class OpcuaConnection {
   }
 
   /**
-   * Start session keep-alive timer
+   * Start mapp Connect session keep-alive timer
    */
   private startSessionKeepAlive(): void {
     if (this.sessionTimer) {
@@ -318,27 +590,33 @@ export class OpcuaConnection {
 
     this.sessionTimer = setInterval(async () => {
       try {
-        await fetch(`${this.baseUrl}/opcua/session`, {
+        // Use the proper session endpoint for timeout reset
+        const url = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo!.sessionId}`;
+        await fetch(url, {
           method: 'HEAD',
           headers: {
             'Authorization': `Bearer ${this.sessionInfo!.sessionId}`
           }
         });
+        console.log('mapp Connect session timeout reset successful');
       } catch (error) {
-        console.warn('Session keep-alive failed:', error);
+        console.warn('mapp Connect session keep-alive failed:', error);
       }
     }, this.config.keepAliveInterval);
   }
 
   /**
-   * Connect to WebSocket push channel
+   * Connect to mapp Connect WebSocket push channel
    */
   private async connectWebSocket(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       try {
-        const wsUrl = `ws://${this.config.host}:${this.config.port || 80}/opcua/pushchannel?sessionid=${this.sessionInfo!.sessionId}`;
+        const wsProtocol = this.config.wsProtocol || 'ws';
+        const port = this.config.port || (this.config.protocol === 'https' ? 443 : 80);
+        const wsUrl = `${wsProtocol}://${this.config.host}:${port}/api/1.0/pushchannel?sessionid=${this.sessionInfo!.sessionId}`;
         
-        this.webSocketManager.create(wsUrl);
+        console.log(`Connecting mapp Connect WebSocket to: ${wsUrl}`);
+        await this.webSocketManager.create(wsUrl);
         
         this.webSocketManager.setupEvents(
           () => {

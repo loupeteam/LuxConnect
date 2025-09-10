@@ -233,12 +233,8 @@ export class OpcuaMachine {
   public async readVariable(varName: string, options: VariableOptions = {}): Promise<any> {
     const nodeId = this.buildNodeId(varName, options);
     
-    const response = await this.connection.apiRequest('/opcua/readValue', {
-      method: 'POST',
-      body: JSON.stringify({
-        nodeId: nodeId,
-        attributeId: 13 // Value attribute
-      })
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
+      method: 'GET'
     });
 
     const result = await response.json();
@@ -261,15 +257,10 @@ export class OpcuaMachine {
   public async writeVariable(varName: string, value: any, options: VariableOptions = {}): Promise<void> {
     const nodeId = this.buildNodeId(varName, options);
     
-    const response = await this.connection.apiRequest('/opcua/writeValue', {
-      method: 'POST',
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
+      method: 'PUT',
       body: JSON.stringify({
-        nodeId: nodeId,
-        attributeId: 13, // Value attribute
-        value: {
-          value: value,
-          type: this.inferDataType(value)
-        }
+        value: value
       })
     });
 
@@ -357,7 +348,7 @@ export class OpcuaMachine {
       publishingEnabled: true
     };
 
-    const response = await this.connection.apiRequest('/opcua/subscription', {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions`, {
       method: 'POST',
       body: JSON.stringify(subscriptionParams)
     });
@@ -384,7 +375,7 @@ export class OpcuaMachine {
     }
 
     try {
-      await this.connection.apiRequest(`/opcua/subscription/${group.subscriptionId}`, {
+      await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${group.subscriptionId}`, {
         method: 'DELETE'
       });
     } catch (error) {
@@ -403,25 +394,30 @@ export class OpcuaMachine {
     this.clientHandleMap.set(clientHandle, varName);
 
     const monitoredItemParams = {
-      nodeId: nodeId,
-      attributeId: 13, // Value attribute
-      samplingInterval: 1000, // Could be configured per read group
-      discardOldest: true,
-      queueSize: 1,
-      clientHandle: clientHandle
+      itemToMonitor: {
+        nodeId: nodeId,
+        attribute: 'Value'
+      },
+      monitoringParameters: {
+        clientHandle: clientHandle,
+        samplingInterval: 1000, // Could be configured per read group
+        queueSize: 1
+      },
+      timestampsToReturn: 'Both',
+      monitoringMode: 'Reporting'
     };
 
     const response = await this.connection.apiRequest(
-      `/opcua/subscription/${subscriptionId}/monitoredItems`, 
+      `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscriptionId}/monitoredItems`, 
       {
         method: 'POST',
-        body: JSON.stringify([monitoredItemParams])
+        body: JSON.stringify(monitoredItemParams)
       }
     );
 
     const results = await response.json();
     
-    if (!results || results.length === 0 || !results[0].monitoredItemId) {
+    if (!results || !results.monitoredItemId) {
       throw new Error(`Failed to create monitored item for ${varName}`);
     }
   }
@@ -470,16 +466,6 @@ export class OpcuaMachine {
         }
       }
     }
-  }
-
-  private inferDataType(value: any): number {
-    if (typeof value === 'boolean') return 1; // Boolean
-    if (typeof value === 'number') {
-      if (Number.isInteger(value)) return 6; // Int32
-      return 11; // Double
-    }
-    if (typeof value === 'string') return 12; // String
-    return 24; // BaseDataType (generic)
   }
 }
 
