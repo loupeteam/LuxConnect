@@ -15,6 +15,13 @@ import {
   ConnectionState
 } from '../src/index.js';
 
+// Extend Window interface for debugging
+declare global {
+  interface Window {
+    machine?: OpcuaMachine;
+  }
+}
+
 async function basicUsageExample() {
   console.log('🚀 Basic lux-opcua Usage Example');
   console.log('=================================\n');
@@ -29,7 +36,7 @@ async function basicUsageExample() {
 
   // Create the OPC UA machine (lux.js style)
   const machine = new OpcuaMachine(config);
-
+  window.machine = machine; // Expose for debugging in browser console
   try {
     // Set up event handlers
     machine.onConnectionStateChanged((state: ConnectionState) => {

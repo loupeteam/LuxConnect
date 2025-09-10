@@ -1,4 +1,6 @@
 import { OpcuaConnection } from './connection.js';
+import { VariableManager } from './variable-manager.js';
+import { SubscriptionManager } from './subscription-manager.js';
 import { 
   ConnectionConfig, 
   ConnectionState, 
@@ -32,22 +34,19 @@ export interface VariableOptions {
  */
 export class OpcuaMachine {
   private connection: OpcuaConnection;
+  private variableManager: VariableManager;
+  private subscriptionManager: SubscriptionManager;
   private defaultNamespace: string = 'ns=1;s=';
   private readGroups = new Map<string, ReadGroupInfo>();
-  private variableMap = new Map<string, string>(); // varName -> nodeId
-  private subscriptionMap = new Map<string, number>(); // readGroup -> subscriptionId
-  private clientHandleMap = new Map<number, string>(); // clientHandle -> varName
-  private clientHandleCounter = 1;
-
-  // Direct property access storage (lux.js style)
-  private _values = new Map<string, any>();
-  private _callbacks = new Map<string, Array<(value: any) => void>>();
+  private pendingVariables = new Map<string, string>(); // varName -> nodeId for deferred registration
 
   // Index signature for dynamic property access (lux.js style)
   [key: string]: any;
 
   constructor(config: ConnectionConfig) {
     this.connection = new OpcuaConnection(config);
+    this.variableManager = new VariableManager(this.connection);
+    this.subscriptionManager = new SubscriptionManager(this.connection, this.variableManager);
     
     // Create default read group
     this.readGroups.set('default', {
@@ -71,9 +70,35 @@ export class OpcuaMachine {
           return (target as any)[prop];
         }
         
-        // If it's a variable name, return cached value
-        if (target._values.has(prop)) {
-          return target._values.get(prop);
+        const propStr = prop.toString();
+        
+        // First, try to get registered variable value by exact name
+        const variable = target.variableManager.getVariable(propStr);
+        if (variable !== undefined) {
+          return variable.value;
+        }
+        
+        // Check if this could be a simple variable access (machine.MyVar)
+        const simpleVarValue = target.getFromGlobalState(propStr);
+        if (simpleVarValue !== undefined && typeof simpleVarValue !== 'object') {
+          // It's a primitive value, return it
+          return simpleVarValue;
+        }
+        
+        // If it's an object (scope/app module), return a scope proxy or the data itself
+        const globalState = target.variableManager.getGlobalState();
+        
+        // Check if propStr is an app module
+        if (globalState[propStr]) {
+          return target.createScopeProxy(propStr);
+        }
+        
+        // Check if propStr is a scope name in any app module
+        for (const appModule of Object.keys(globalState)) {
+          if (globalState[appModule][propStr]) {
+            // Return the scope data wrapped in a proxy for individual variable access
+            return target.createVariableProxy(appModule, propStr, globalState[appModule][propStr]);
+          }
         }
         
         return undefined;
@@ -86,7 +111,7 @@ export class OpcuaMachine {
           return true;
         }
         
-        // If it's a variable name, write it
+        // If it's a variable name, write it via VariableManager
         if (typeof value !== 'function') {
           target.writeVariable(prop.toString(), value).catch(console.error);
           return true;
@@ -105,7 +130,16 @@ export class OpcuaMachine {
   public async connect(): Promise<void> {
     await this.connection.connect();
     
-    // Auto-create subscriptions for any existing read groups
+    // Register all pending variables with VariableManager
+    for (const [varName, nodeId] of this.pendingVariables) {
+      try {
+        await this.variableManager.registerVariable(varName, nodeId);
+      } catch (error) {
+        console.warn(`Failed to register variable ${varName}:`, error);
+      }
+    }
+    
+    // Create subscriptions for read groups
     for (const [name, group] of this.readGroups) {
       if (group.variables.size > 0 && group.options.enabled) {
         await this.createOrUpdateSubscription(name);
@@ -165,20 +199,22 @@ export class OpcuaMachine {
     // Build nodeId
     const nodeId = this.buildNodeId(varName, options);
     
-    // Store mapping
-    this.variableMap.set(varName, nodeId);
+    // Store for deferred registration
+    this.pendingVariables.set(varName, nodeId);
     
     // Add to read group
     const group = this.readGroups.get(readGroup)!;
     group.variables.add(varName);
     
+    // Register with VariableManager if connected
+    if (this.isConnected) {
+      this.variableManager.registerVariable(varName, nodeId).catch(console.error);
+    }
+    
     // Set up callback if provided
     if (callback) {
       this.onChange(varName, callback);
     }
-    
-    // Initialize property access
-    this._values.set(varName, undefined);
     
     // Update subscription if connected
     if (this.isConnected && group.options.enabled) {
@@ -231,47 +267,28 @@ export class OpcuaMachine {
    * Read a variable once (async with await)
    */
   public async readVariable(varName: string, options: VariableOptions = {}): Promise<any> {
-    const nodeId = this.buildNodeId(varName, options);
-    
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
-      method: 'GET'
-    });
-
-    const result = await response.json();
-    
-    if (result.statusCode?.value !== 0) {
-      throw new Error(`Failed to read variable '${varName}': ${result.statusCode?.description || 'Unknown error'}`);
+    // Check if variable is registered, if not register it temporarily
+    let variable = this.variableManager.getVariable(varName);
+    if (!variable) {
+      const nodeId = this.buildNodeId(varName, options);
+      variable = await this.variableManager.registerVariable(varName, nodeId);
     }
-
-    const value = result.value?.value;
     
-    // Update local cache
-    this._values.set(varName, value);
-    
-    return value;
+    return await this.variableManager.readValue(varName);
   }
 
   /**
    * Write a variable once (async with await)
    */
   public async writeVariable(varName: string, value: any, options: VariableOptions = {}): Promise<void> {
-    const nodeId = this.buildNodeId(varName, options);
-    
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        value: value
-      })
-    });
-
-    const result = await response.json();
-    
-    if (result.statusCode?.value !== 0) {
-      throw new Error(`Failed to write variable '${varName}': ${result.statusCode?.description || 'Unknown error'}`);
+    // Check if variable is registered, if not register it temporarily
+    let variable = this.variableManager.getVariable(varName);
+    if (!variable) {
+      const nodeId = this.buildNodeId(varName, options);
+      variable = await this.variableManager.registerVariable(varName, nodeId);
     }
-
-    // Update local cache
-    this._values.set(varName, value);
+    
+    await this.variableManager.writeValue(varName, value);
   }
 
   /**
@@ -285,12 +302,154 @@ export class OpcuaMachine {
    * Add change handler for a variable
    */
   public onChange(varName: string, callback: (value: any) => void): void {
-    // Store callback - we'll implement this with a callback map
-    const key = `${varName}_change`;
-    if (!this._callbacks.has(key)) {
-      this._callbacks.set(key, []);
+    // Delegate to VariableManager
+    this.variableManager.onChange(varName, (event) => {
+      callback(event.value);
+    });
+  }
+
+  /**
+   * Get a value from the global state hierarchy with intelligent fallback
+   * Supports: machine.varname (checks global first, then tasks), machine.task.varname, etc.
+   */
+  public getFromGlobalState(path: string): any {
+    const globalState = this.variableManager.getGlobalState();
+    const pathComponents = path.split('.');
+    
+    // If single component (e.g., "MyVar"), try intelligent lookup
+    if (pathComponents.length === 1) {
+      const varName = pathComponents[0];
+      
+      // First check all app modules for AsGlobalPV scope
+      for (const appModule of Object.keys(globalState)) {
+        const asGlobalPV = globalState[appModule]?.AsGlobalPV?.[varName];
+        if (asGlobalPV !== undefined) {
+          return asGlobalPV;
+        }
+      }
+      
+      // If not found in global scope, check all tasks in all app modules
+      for (const appModule of Object.keys(globalState)) {
+        for (const scope of Object.keys(globalState[appModule] || {})) {
+          if (scope !== 'AsGlobalPV') { // Already checked global
+            const taskVar = globalState[appModule][scope]?.[varName];
+            if (taskVar !== undefined) {
+              return taskVar;
+            }
+          }
+        }
+      }
+      
+      return undefined;
     }
-    this._callbacks.get(key)!.push(callback);
+    
+    // For multi-component paths, navigate directly
+    let current = globalState;
+    for (const component of pathComponents) {
+      if (current == null || typeof current !== 'object') {
+        return undefined;
+      }
+      current = current[component];
+    }
+    
+    return current;
+  }
+
+  /**
+   * Get all available app modules
+   */
+  public getAppModules(): string[] {
+    const globalState = this.variableManager.getGlobalState();
+    return Object.keys(globalState).filter(key => key !== '_default');
+  }
+
+  /**
+   * Get all scopes (tasks + AsGlobalPV) for an app module
+   */
+  public getScopes(appModule: string = '_default'): string[] {
+    const globalState = this.variableManager.getGlobalState();
+    const moduleData = globalState[appModule];
+    return moduleData ? Object.keys(moduleData) : [];
+  }
+
+  /**
+   * Get all variables in a specific scope
+   */
+  public getVariablesInScope(appModule: string = '_default', scope: string = 'AsGlobalPV'): string[] {
+    const globalState = this.variableManager.getGlobalState();
+    const scopeData = globalState[appModule]?.[scope];
+    return scopeData ? Object.keys(scopeData) : [];
+  }
+
+  /**
+   * Get the complete global state (for debugging and introspection)
+   */
+  public getGlobalState(): any {
+    return this.variableManager.getGlobalState();
+  }
+
+  /**
+   * Create a proxy for accessing scopes within an app module
+   * Handles: machine.AppModule.ScopeName
+   */
+  private createScopeProxy(appModule: string): any {
+    const target = this;
+    return new Proxy({}, {
+      get: (_obj, prop: string | symbol) => {
+        if (typeof prop !== 'string') return undefined;
+        
+        const globalState = target.variableManager.getGlobalState();
+        const scopeData = globalState[appModule]?.[prop];
+        
+        if (scopeData) {
+          // Return a proxy that can access individual variables OR return the whole scope
+          return target.createVariableProxy(appModule, prop, scopeData);
+        }
+        
+        return undefined;
+      }
+    });
+  }
+
+  /**
+   * Create a proxy for accessing variables within a specific scope
+   * Handles: machine.ScopeName.VarName or machine.AppModule.ScopeName.VarName
+   * Also supports: machine.ScopeName (returns all variables in scope)
+   */
+  private createVariableProxy(appModule: string, scope: string, scopeData?: any): any {
+    const target = this;
+    const data = scopeData || target.variableManager.getGlobalState()[appModule]?.[scope];
+    
+    if (!data) return undefined;
+    
+    return new Proxy(data, {
+      get: (obj, prop: string | symbol) => {
+        if (typeof prop !== 'string') return undefined;
+        
+        // If the property exists in the scope data, return it
+        if (prop in obj) {
+          return obj[prop];
+        }
+        
+        return undefined;
+      },
+      
+      // Allow enumeration of properties
+      ownKeys: (obj) => {
+        return Object.keys(obj);
+      },
+      
+      getOwnPropertyDescriptor: (obj, prop) => {
+        if (prop in obj) {
+          return {
+            enumerable: true,
+            configurable: true,
+            value: obj[prop]
+          };
+        }
+        return undefined;
+      }
+    });
   }
 
   // Direct property access implementation (lux.js style)
@@ -338,33 +497,38 @@ export class OpcuaMachine {
       await this.deleteSubscription(readGroupName);
     }
 
-    // Create new subscription
-    const subscriptionParams = {
+    // Ensure all variables are registered first
+    for (const varName of group.variables) {
+      const nodeId = this.pendingVariables.get(varName);
+      if (nodeId && !this.variableManager.getVariable(varName)) {
+        try {
+          await this.variableManager.registerVariable(varName, nodeId);
+        } catch (error) {
+          console.warn(`Failed to register variable ${varName}:`, error);
+        }
+      }
+    }
+
+    // Create subscription via SubscriptionManager
+    const subscriptionOptions = {
       publishingInterval: group.options.publishingInterval || 1000,
       maxNotificationsPerPublish: group.options.maxNotificationsPerPublish || 10,
       priority: group.options.priority || 0,
       lifetimeCount: 3000,
-      maxKeepAliveCount: 10,
-      publishingEnabled: true
+      maxKeepAliveCount: 10
     };
 
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions`, {
-      method: 'POST',
-      body: JSON.stringify(subscriptionParams)
-    });
-
-    const result = await response.json();
-    
-    if (!result.subscriptionId) {
-      throw new Error(`Failed to create subscription for read group '${readGroupName}'`);
-    }
-
-    group.subscriptionId = result.subscriptionId;
-    this.subscriptionMap.set(readGroupName, result.subscriptionId);
+    const subscriptionName = await this.subscriptionManager.createSubscription(readGroupName, subscriptionOptions);
+    const subscriptionInfo = this.subscriptionManager.getSubscription(subscriptionName);
+    group.subscriptionId = subscriptionInfo?.subscriptionId || null;
 
     // Add all variables to the subscription
     for (const varName of group.variables) {
-      await this.addVariableToSubscription(result.subscriptionId, varName);
+      try {
+        await this.subscriptionManager.addVariable(readGroupName, varName);
+      } catch (error) {
+        console.warn(`Failed to add variable ${varName} to subscription:`, error);
+      }
     }
   }
 
@@ -375,97 +539,18 @@ export class OpcuaMachine {
     }
 
     try {
-      await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${group.subscriptionId}`, {
-        method: 'DELETE'
-      });
+      await this.subscriptionManager.deleteSubscription(readGroupName);
     } catch (error) {
       console.warn(`Failed to delete subscription for read group '${readGroupName}':`, error);
     }
 
     group.subscriptionId = null;
-    this.subscriptionMap.delete(readGroupName);
-  }
-
-  private async addVariableToSubscription(subscriptionId: number, varName: string): Promise<void> {
-    const nodeId = this.variableMap.get(varName);
-    if (!nodeId) return;
-
-    const clientHandle = this.clientHandleCounter++;
-    this.clientHandleMap.set(clientHandle, varName);
-
-    const monitoredItemParams = {
-      itemToMonitor: {
-        nodeId: nodeId,
-        attribute: 'Value'
-      },
-      monitoringParameters: {
-        clientHandle: clientHandle,
-        samplingInterval: 1000, // Could be configured per read group
-        queueSize: 1
-      },
-      timestampsToReturn: 'Both',
-      monitoringMode: 'Reporting'
-    };
-
-    const response = await this.connection.apiRequest(
-      `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscriptionId}/monitoredItems`, 
-      {
-        method: 'POST',
-        body: JSON.stringify(monitoredItemParams)
-      }
-    );
-
-    const results = await response.json();
-    
-    if (!results || !results.monitoredItemId) {
-      throw new Error(`Failed to create monitored item for ${varName}`);
-    }
   }
 
   private setupWebSocketHandler(): void {
-    this.connection.onConnectionStateChanged((state) => {
-      if (state === 'connected') {
-        this.setupWebSocketNotifications();
-      }
-    });
-  }
-
-  private setupWebSocketNotifications(): void {
-    // Set up message handler for WebSocket notifications
-    this.connection.onMessage((message: any) => {
-      if (message.type === 'DataNotification') {
-        this.handleDataNotification(message);
-      }
-    });
-  }
-
-  private handleDataNotification(notification: any): void {
-    if (!notification.dataValues) return;
-
-    for (const dataValue of notification.dataValues) {
-      const varName = this.clientHandleMap.get(dataValue.clientHandle);
-      if (!varName) continue;
-
-      const oldValue = this._values.get(varName);
-      const newValue = dataValue.value;
-
-      // Update cached value
-      this._values.set(varName, newValue);
-
-      // Call change callbacks if value actually changed
-      if (oldValue !== newValue) {
-        const callbacks = this._callbacks.get(`${varName}_change`);
-        if (callbacks) {
-          callbacks.forEach(callback => {
-            try {
-              callback(newValue);
-            } catch (error) {
-              console.error(`Callback error for ${varName}:`, error);
-            }
-          });
-        }
-      }
-    }
+    // WebSocket notifications are now handled by SubscriptionManager
+    // No need for additional setup here since SubscriptionManager will
+    // automatically update VariableManager when notifications arrive
   }
 }
 

@@ -124,8 +124,8 @@
         <div class="input-group">
             <label for="protocol">Protocol:</label>
             <select id="protocol">
-                <option value="http">HTTP</option>
                 <option value="https">HTTPS</option>
+                <option value="http">HTTP</option>
             </select>
         </div>
         <div class="input-group">
@@ -134,13 +134,13 @@
         </div>
         <div class="input-group">
             <label for="port">Port:</label>
-            <input type="number" id="port" value="80" />
+            <input type="number" id="port" value="8443" />
         </div>
         <div class="input-group">
             <label for="wsProtocol">WebSocket:</label>
             <select id="wsProtocol">
-                <option value="ws">WS (WebSocket)</option>
                 <option value="wss">WSS (Secure WebSocket)</option>
+                <option value="ws">WS (WebSocket)</option>
             </select>
         </div>
         <div class="input-group">
@@ -319,6 +319,7 @@
                 await machine.connect();
                 
                 log('✅ Connected successfully!');
+                window.machine = machine; // Expose for debugging in browser console
 
             } catch (error) {
                 log(`❌ Connection failed: ${error.message}`);

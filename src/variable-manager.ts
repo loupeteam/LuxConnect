@@ -4,14 +4,18 @@ import {
   VariableChangeEvent, 
   VariableChangeHandler 
 } from './types.js';
+import { 
+  SimpleVariableHierarchy, 
+  VariablePathParser
+} from './simple-variable-hierarchy.js';
 
 /**
- * Variable manager implementing lux.js-style patterns for OPC UA variables
- * Provides named variable management with local value mirroring and change notifications
+ * Simplified variable manager using global state with deep copying
+ * Much simpler and easier to understand than the complex hierarchical approach
  */
 export class VariableManager {
   private connection: OpcuaConnection;
-  private variables = new Map<string, OpcuaVariable>();
+  private hierarchy = new SimpleVariableHierarchy();
   private changeHandlers = new Map<string, VariableChangeHandler[]>();
   private globalChangeHandlers: VariableChangeHandler[] = [];
 
@@ -20,23 +24,49 @@ export class VariableManager {
   }
 
   /**
-   * Register a variable with a friendly name (lux.js style)
-   * This creates a local mirror of the OPC UA variable
+   * Register a variable with format validation
    */
   public async registerVariable(name: string, nodeId: string): Promise<OpcuaVariable> {
-    if (this.variables.has(name)) {
+    // Validate variable name format
+    try {
+      VariablePathParser.parse(name);
+    } catch (error) {
+      throw new Error(`Invalid variable name format '${name}': ${error}`);
+    }
+
+    // Check if already registered
+    if (this.hierarchy.getVariable(name)) {
       throw new Error(`Variable '${name}' is already registered`);
     }
 
-    // Read initial value and metadata
-    const variable = await this.readVariableInfo(nodeId);
-    const namedVariable: OpcuaVariable = {
-      ...variable,
+    // Use default values - real values will come from subscription updates
+    const variableInfo = {
+      value: undefined,
+      timestamp: new Date(),
+      quality: 'unknown' as const,
+      dataType: undefined
+    };
+    
+    // Add to hierarchy
+    this.hierarchy.addVariable(
       name,
-      nodeId
+      nodeId,
+      variableInfo.value,
+      variableInfo.timestamp,
+      variableInfo.quality,
+      variableInfo.dataType
+    );
+
+    // Convert to OpcuaVariable format for backward compatibility
+    const namedVariable: OpcuaVariable = {
+      name,
+      nodeId,
+      value: variableInfo.value,
+      timestamp: variableInfo.timestamp,
+      quality: variableInfo.quality,
+      ...(variableInfo.dataType ? { dataType: variableInfo.dataType } : {})
     };
 
-    this.variables.set(name, namedVariable);
     return namedVariable;
   }
 
@@ -44,21 +74,44 @@ export class VariableManager {
    * Get a registered variable by name
    */
   public getVariable(name: string): OpcuaVariable | undefined {
-    return this.variables.get(name);
+    const varData = this.hierarchy.getVariable(name);
+    if (!varData) return undefined;
+
+    return {
+      name: varData.mapping.name,
+      nodeId: varData.mapping.nodeId,
+      value: varData.value,
+      timestamp: varData.timestamp,
+      quality: varData.quality,
+      ...(varData.mapping.dataType && { dataType: varData.mapping.dataType })
+    };
   }
 
   /**
    * Get all registered variables
    */
   public getAllVariables(): Map<string, OpcuaVariable> {
-    return new Map(this.variables);
+    const result = new Map<string, OpcuaVariable>();
+    
+    for (const [name, varData] of this.hierarchy.getAllVariables()) {
+      result.set(name, {
+        name: varData.mapping.name,
+        nodeId: varData.mapping.nodeId,
+        value: varData.value,
+        timestamp: varData.timestamp,
+        quality: varData.quality,
+        ...(varData.mapping.dataType && { dataType: varData.mapping.dataType })
+      });
+    }
+    
+    return result;
   }
 
   /**
    * Unregister a variable
    */
   public unregisterVariable(name: string): boolean {
-    const removed = this.variables.delete(name);
+    const removed = this.hierarchy.removeVariable(name);
     if (removed) {
       this.changeHandlers.delete(name);
     }
@@ -66,15 +119,15 @@ export class VariableManager {
   }
 
   /**
-   * Read the current value of a variable by name (lux.js style)
+   * Read the current value of a variable by name
    */
   public async readValue(name: string): Promise<any> {
-    const variable = this.variables.get(name);
-    if (!variable) {
+    const varData = this.hierarchy.getVariable(name);
+    if (!varData) {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(variable.nodeId)}/attributes/Value`, {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(varData.mapping.nodeId)}/attributes/Value`, {
       method: 'GET'
     });
 
@@ -84,26 +137,34 @@ export class VariableManager {
       throw new Error(`Failed to read variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
     }
 
-    // Update local mirror
+    // Update hierarchy with new value
     const newValue = result.value?.value;
     const timestamp = new Date(result.serverTimestamp || Date.now());
     const quality = this.mapQualityCode(result.statusCode?.value || 0);
 
-    this.updateLocalVariable(name, newValue, timestamp, quality);
+    const affectedVariables = this.hierarchy.updateVariable(name, newValue, timestamp, quality);
+    
+    // Emit change events for all affected variables
+    for (const affectedName of affectedVariables) {
+      const affectedData = this.hierarchy.getVariable(affectedName);
+      if (affectedData) {
+        this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+      }
+    }
 
     return newValue;
   }
 
   /**
-   * Write a value to a variable by name (lux.js style)
+   * Write a value to a variable by name
    */
   public async writeValue(name: string, value: any): Promise<void> {
-    const variable = this.variables.get(name);
-    if (!variable) {
+    const varData = this.hierarchy.getVariable(name);
+    if (!varData) {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(variable.nodeId)}/attributes/Value`, {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(varData.mapping.nodeId)}/attributes/Value`, {
       method: 'PUT',
       body: JSON.stringify({
         value: value
@@ -116,17 +177,25 @@ export class VariableManager {
       throw new Error(`Failed to write variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
     }
 
-    // Update local mirror
+    // Update hierarchy
     const timestamp = new Date();
     const quality = this.mapQualityCode(result.statusCode?.value || 0);
-    this.updateLocalVariable(name, value, timestamp, quality);
+    const affectedVariables = this.hierarchy.updateVariable(name, value, timestamp, quality);
+    
+    // Emit change events for all affected variables
+    for (const affectedName of affectedVariables) {
+      const affectedData = this.hierarchy.getVariable(affectedName);
+      if (affectedData) {
+        this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+      }
+    }
   }
 
   /**
-   * Add a change handler for a specific variable (lux.js style)
+   * Add a change handler for a specific variable
    */
   public onChange(name: string, handler: VariableChangeHandler): void {
-    if (!this.variables.has(name)) {
+    if (!this.hierarchy.getVariable(name)) {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
@@ -169,96 +238,90 @@ export class VariableManager {
 
   /**
    * Update a variable from external source (e.g., subscription notification)
-   * This is used internally by the subscription manager
+   * This automatically handles hierarchical updates through the global state
    */
   public updateVariableFromNotification(nodeId: string, value: any, timestamp: Date, quality: string): void {
-    // Find variable by nodeId
-    for (const [name, variable] of this.variables) {
-      if (variable.nodeId === nodeId) {
-        this.updateLocalVariable(name, value, timestamp, quality);
-        break;
+    const varData = this.hierarchy.getVariableByNodeId(nodeId);
+    if (!varData) return;
+
+    // Update in hierarchy (this automatically updates related variables via global state)
+    const affectedVariables = this.hierarchy.updateVariable(varData.mapping.name, value, timestamp, quality);
+    
+    // Emit change events for all affected variables
+    for (const affectedName of affectedVariables) {
+      const affectedData = this.hierarchy.getVariable(affectedName);
+      if (affectedData) {
+        this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
       }
     }
   }
 
   /**
-   * Read variable information from the server
+   * Get variables that are related to the given variable
    */
-  private async readVariableInfo(nodeId: string): Promise<OpcuaVariable> {
-    // Read value
-    const valueResponse = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
-      method: 'GET'
-    });
-
-    const valueResult = await valueResponse.json();
+  public getRelatedVariables(name: string): Array<{ type: 'parent' | 'child' | 'sibling'; variable: OpcuaVariable }> {
+    const related = this.hierarchy.findRelatedVariables(name);
     
-    // Read data type
-    const dataTypeResponse = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/DataType`, {
-      method: 'GET'
+    return related.map(rel => {
+      const varData = this.hierarchy.getVariable(rel.variable);
+      if (!varData) throw new Error(`Related variable ${rel.variable} not found`);
+      
+      return {
+        type: rel.type,
+        variable: {
+          name: varData.mapping.name,
+          nodeId: varData.mapping.nodeId,
+          value: varData.value,
+          timestamp: varData.timestamp,
+          quality: varData.quality,
+          ...(varData.mapping.dataType && { dataType: varData.mapping.dataType })
+        }
+      };
     });
-
-    const dataTypeResult = await dataTypeResponse.json();
-
-    return {
-      nodeId,
-      name: '', // Will be set by caller
-      value: valueResult.value?.value,
-      timestamp: new Date(valueResult.serverTimestamp || Date.now()),
-      quality: this.mapQualityCode(valueResult.statusCode?.value || 0),
-      dataType: dataTypeResult.value?.value || 'Unknown'
-    };
   }
 
   /**
-   * Update local variable mirror and emit change events
+   * Get current global state (for debugging)
    */
-  private updateLocalVariable(name: string, value: any, timestamp: Date, quality: string): void {
-    const variable = this.variables.get(name);
-    if (!variable) return;
+  public getGlobalState(): any {
+    return this.hierarchy.getGlobalState();
+  }
 
-    const oldValue = variable.value;
-    
-    // Update local mirror
-    const updatedVariable: OpcuaVariable = {
-      ...variable,
+  /**
+   * Emit change event for a variable
+   */
+  private emitChangeEvent(name: string, value: any, timestamp: Date, quality: string): void {
+    const varData = this.hierarchy.getVariable(name);
+    if (!varData) return;
+
+    const changeEvent: VariableChangeEvent = {
+      nodeId: varData.mapping.nodeId,
+      name,
       value,
       timestamp,
       quality
     };
-    
-    this.variables.set(name, updatedVariable);
 
-    // Only emit change if value actually changed
-    if (oldValue !== value) {
-      const changeEvent: VariableChangeEvent = {
-        nodeId: variable.nodeId,
-        name,
-        value,
-        timestamp,
-        quality
-      };
-
-      // Emit to specific variable handlers
-      const handlers = this.changeHandlers.get(name);
-      if (handlers) {
-        handlers.forEach(handler => {
-          try {
-            handler(changeEvent);
-          } catch (error) {
-            console.error(`Variable change handler error for '${name}':`, error);
-          }
-        });
-      }
-
-      // Emit to global handlers
-      this.globalChangeHandlers.forEach(handler => {
+    // Emit to specific variable handlers
+    const handlers = this.changeHandlers.get(name);
+    if (handlers) {
+      handlers.forEach(handler => {
         try {
           handler(changeEvent);
         } catch (error) {
-          console.error(`Global change handler error for '${name}':`, error);
+          console.error(`Variable change handler error for '${name}':`, error);
         }
       });
     }
+
+    // Emit to global handlers
+    this.globalChangeHandlers.forEach(handler => {
+      try {
+        handler(changeEvent);
+      } catch (error) {
+        console.error(`Global change handler error for '${name}':`, error);
+      }
+    });
   }
 
   /**
@@ -273,8 +336,4 @@ export class VariableManager {
       default: return 'unknown';
     }
   }
-
-  /**
-   * Infer OPC UA data type from JavaScript value
-   */
 }

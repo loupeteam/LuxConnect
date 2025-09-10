@@ -18,16 +18,6 @@ interface MonitoredItemInfo {
   variableName?: string; // For registered variables
 }
 
-interface WebSocketNotification {
-  subscriptionId: number;
-  dataValues: Array<{
-    clientHandle: number;
-    value: any;
-    statusCode: { value: number };
-    serverTimestamp: string;
-  }>;
-}
-
 /**
  * Subscription manager for real-time OPC UA variable monitoring
  * Handles OPC UA subscriptions and integrates with WebSocket notifications
@@ -355,8 +345,10 @@ export class SubscriptionManager {
   private setupWebSocketNotifications(): void {
     // Use the connection's message handler instead of direct WebSocket access
     this.connection.onMessage((message: any) => {
-      if (message.type === 'DataNotification') {
-        this.handleDataNotification(message);
+      if (message.DataNotifications && Array.isArray(message.DataNotifications)) {
+        for (const dataNotification of message.DataNotifications) {
+          this.handleDataNotification(dataNotification);
+        }
       }
     });
   }
@@ -364,25 +356,22 @@ export class SubscriptionManager {
   /**
    * Handle incoming data notification from WebSocket
    */
-  private handleDataNotification(notification: WebSocketNotification): void {
-    if (!notification.dataValues) return;
+  private handleDataNotification(dataNotification: any): void {
+    // Each dataNotification in the array contains the actual data value
+    const monitoredItem = this.clientHandleMap.get(dataNotification.clientHandle);
+    if (!monitoredItem) return;
 
-    for (const dataValue of notification.dataValues) {
-      const monitoredItem = this.clientHandleMap.get(dataValue.clientHandle);
-      if (!monitoredItem) continue;
+    const timestamp = new Date(dataNotification.serverTimestamp || Date.now());
+    const quality = this.mapQualityCode(dataNotification.status?.code || 0);
 
-      const timestamp = new Date(dataValue.serverTimestamp || Date.now());
-      const quality = this.mapQualityCode(dataValue.statusCode?.value || 0);
-
-      // Update variable manager if this is a registered variable
-      if (monitoredItem.variableName) {
-        this.variableManager.updateVariableFromNotification(
-          monitoredItem.nodeId,
-          dataValue.value,
-          timestamp,
-          quality
-        );
-      }
+    // Update variable manager if this is a registered variable
+    if (monitoredItem.variableName) {
+      this.variableManager.updateVariableFromNotification(
+        monitoredItem.nodeId,
+        dataNotification.value,
+        timestamp,
+        quality
+      );
     }
   }
 
