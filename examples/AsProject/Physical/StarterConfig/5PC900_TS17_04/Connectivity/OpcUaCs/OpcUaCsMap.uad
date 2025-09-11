@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<?AutomationStudio FileVersion="6.0"?>
+<OpcUaSource FileVersion="10">
+  <Aliases>
+    <ACLAliases />
+    <EURangeViolationAliases />
+    <EURangesAliases />
+    <EngineeringUnitAliases />
+  </Aliases>
+  <Module Name="&lt;Default&gt;">
+    <Task Name="demo">
+      <Variable Name="test" RecursiveEnable="2" />
+    </Task>
+    <Task Name="demoGlobal" />
+    <Task Name="Page">
+      <Variable Name="MyVar" RecursiveEnable="2" />
+    </Task>
+  </Module>
+</OpcUaSource>

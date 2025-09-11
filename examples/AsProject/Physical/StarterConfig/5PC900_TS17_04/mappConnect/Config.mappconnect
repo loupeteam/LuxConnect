@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<?AutomationStudio FileVersion="4.9"?>
+<Configuration>
+  <Element ID="mapp Connect Configuration" Type="mappconnect">
+    <Selector ID="WebServerProtocol">
+      <Property ID="WebServerPortSsl" Value="8443" />
+      <Property ID="Interface" Value="All" />
+      <Property ID="SSLConfiguration" />
+    </Selector>
+    <Group ID="WebServerEndpointConfiguration">
+      <Group ID="Endpoint[1]">
+        <Property ID="Endpoint" Value="/Index.html" />
+        <Group ID="Roles" />
+      </Group>
+      <Group ID="Endpoint[2]">
+        <Property ID="Endpoint" Value="/api/*" />
+        <Group ID="Roles" />
+      </Group>
+      <Group ID="Endpoint[3]">
+        <Property ID="Endpoint" Value="/*" />
+        <Group ID="Roles" />
+      </Group>
+    </Group>
+    <Group ID="OpcUaServerWhitelist">
+      <Group ID="OpcUaServer[1]">
+        <Property ID="Url" Value="opc.tcp://127.0.0.1:4840" />
+      </Group>
+    </Group>
+  </Element>
+</Configuration>

@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapp Connect API Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .status.info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .response-area {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .variable-item {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Mapp Connect REST API Tester</h1>
+        
+        <!-- Server Configuration -->
+        <div class="section">
+            <h2>Server Configuration</h2>
+            <div class="form-group">
+                <label for="serverHost">Server Host:</label>
+                <input type="text" id="serverHost" value="localhost" placeholder="localhost">
+            </div>
+            <div class="form-group">
+                <label for="serverPort">Server Port:</label>
+                <input type="number" id="serverPort" value="8443" placeholder="8443">
+            </div>
+            <div class="form-group">
+                <label for="protocol">Protocol:</label>
+                <select id="protocol">
+                    <option value="https">HTTPS</option>
+                    <option value="http">HTTP</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="opcuaUrl">OPC UA Server URL:</label>
+                <input type="text" id="opcuaUrl" value="opc.tcp://127.0.0.1:4840" placeholder="opc.tcp://127.0.0.1:4840">
+            </div>
+        </div>
+
+        <!-- Certificate Test -->
+        <div class="section">
+            <h2>🔐 Certificate Test & Connection</h2>
+            <p><strong>⚠️ If you see "authority error" or certificate errors, this section will help fix it!</strong></p>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <button onclick="testCertificate()" style="background-color: #28a745;">Test Certificate & Connection</button>
+                <button onclick="document.getElementById('protocol').value='http'; updateApiBaseUrl(); testCertificate();" 
+                        style="background-color: #ffc107; color: #000;">Try HTTP Instead</button>
+                <button onclick="window.open(document.getElementById('protocol').value + '://' + document.getElementById('serverHost').value + ':' + document.getElementById('serverPort').value, '_blank')" 
+                        style="background-color: #17a2b8;">Open Server in New Tab</button>
+            </div>
+            
+            <div id="certStatus" class="status info">Click "Test Certificate" to verify connection</div>
+            
+            <div style="margin-top: 15px; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #007bff; border-radius: 4px;">
+                <h4 style="margin-top: 0; color: #007bff;">📋 Quick Certificate Fix Guide:</h4>
+                <ol style="margin-bottom: 0;">
+                    <li><strong>Click "Open Server in New Tab"</strong> above</li>
+                    <li>You'll see a <strong>security warning</strong> about an unsafe connection</li>
+                    <li>Click <strong>"Advanced"</strong> or <strong>"Show details"</strong></li>
+                    <li>Click <strong>"Proceed to localhost (unsafe)"</strong> or <strong>"Accept the risk and continue"</strong></li>
+                    <li>Come back here and click <strong>"Test Certificate"</strong></li>
+                    <li>If still failing, try the <strong>"Try HTTP Instead"</strong> button</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Authentication -->
+        <div class="section">
+            <h2>Authentication</h2>
+            <div class="two-column">
+                <div>
+                    <div class="form-group">
+                        <label for="username">Username (optional):</label>
+                        <input type="text" id="username" placeholder="Leave empty for anonymous">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password:</label>
+                        <input type="password" id="password" placeholder="Leave empty for anonymous">
+                    </div>
+                    <button onclick="authenticate()">Authenticate</button>
+                </div>
+                <div>
+                    <div id="authStatus" class="status info">Not authenticated</div>
+                    <div id="authResponse" class="response-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- OPC UA Session -->
+        <div class="section">
+            <h2>OPC UA Session</h2>
+            <div class="two-column">
+                <div>
+                    <button onclick="createSession()" id="createSessionBtn" disabled>Create OPC UA Session</button>
+                    <button onclick="deleteSession()" id="deleteSessionBtn" disabled>Delete Session</button>
+                    <button onclick="getSessionInfo()" id="sessionInfoBtn" disabled>Get Session Info</button>
+                    <button onclick="manualPingSession()" id="pingSessionBtn" disabled>📡 Ping Session</button>
+                </div>
+                <div>
+                    <div id="sessionStatus" class="status info">No session</div>
+                    <div id="sessionResponse" class="response-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variable Operations -->
+        <div class="section">
+            <h2>Variable Operations</h2>
+            <div class="form-group">
+                <label for="nodeId">Node ID:</label>
+                <input type="text" id="nodeId" value="ns=6;s=::Twincat:TestVar" placeholder="ns=6;s=::AsGlobalPV:Variable">
+            </div>
+            
+            <div class="two-column">
+                <!-- Read Variable -->
+                <div>
+                    <h3>Read Variable</h3>
+                    <div class="form-group">
+                        <label for="readAttribute">Attribute:</label>
+                        <select id="readAttribute">
+                            <option value="Value">Value</option>
+                            <option value="DisplayName">DisplayName</option>
+                            <option value="Description">Description</option>
+                            <option value="DataType">DataType</option>
+                            <option value="AccessLevel">AccessLevel</option>
+                        </select>
+                    </div>
+                    <button onclick="readVariable()" id="readBtn" disabled>Read Variable</button>
+                    <div id="readStatus" class="status info">Ready to read</div>
+                    <div id="readResponse" class="response-area"></div>
+                </div>
+
+                <!-- Write Variable -->
+                <div>
+                    <h3>Write Variable</h3>
+                    <div class="form-group">
+                        <label for="writeValue">Value to Write:</label>
+                        <input type="text" id="writeValue" placeholder="Enter value (string, number, boolean)">
+                    </div>
+                    <div class="form-group">
+                        <label for="valueType">Value Type:</label>
+                        <select id="valueType">
+                            <option value="string">String</option>
+                            <option value="number">Number</option>
+                            <option value="boolean">Boolean</option>
+                        </select>
+                    </div>
+                    <button onclick="writeVariable()" id="writeBtn" disabled>Write Variable</button>
+                    <div id="writeStatus" class="status info">Ready to write</div>
+                    <div id="writeResponse" class="response-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Test Variables -->
+        <div class="section">
+            <h2>Quick Test Variables</h2>
+            <p>Click to quickly set common node IDs for testing:</p>
+            <button onclick="setNodeId('ns=0;i=2258')">Server Status (ns=0;i=2258)</button>
+            <button onclick="setNodeId('ns=0;i=2259')">Server Time (ns=0;i=2259)</button>
+            <button onclick="setNodeId('ns=6;s=::AsGlobalPV:Application')">Application PV</button>
+            <button onclick="setNodeId('ns=6;s=::Simulation')">Simulation</button>
+        </div>
+
+        <!-- Subscription Management -->
+        <div class="section">
+            <h2>📡 Subscription Management</h2>
+            <div class="two-column">
+                <div>
+                    <h3>Create Subscription</h3>
+                    <div class="form-group">
+                        <label for="publishingInterval">Publishing Interval (ms):</label>
+                        <input type="number" id="publishingInterval" value="1000" placeholder="1000">
+                    </div>
+                    <button onclick="createSubscription()" id="createSubscriptionBtn" disabled>Create Subscription</button>
+                    
+                    <h3 style="margin-top: 20px;">Manage Subscriptions</h3>
+                    <div class="form-group">
+                        <label for="subscriptionSelect">Active Subscriptions:</label>
+                        <select id="subscriptionSelect">
+                            <option value="">No subscriptions</option>
+                        </select>
+                    </div>
+                    <button onclick="deleteSubscription()" id="deleteSubscriptionBtn" disabled>Delete Selected</button>
+                </div>
+                <div>
+                    <div id="subscriptionStatus" class="status info">No subscriptions</div>
+                    <div id="subscriptionResponse" class="response-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitored Items -->
+        <div class="section">
+            <h2>📊 Monitored Items</h2>
+            <div class="two-column">
+                <div>
+                    <h3>Monitoring Settings</h3>
+                    <div class="form-group">
+                        <label for="samplingInterval">Sampling Interval (ms):</label>
+                        <input type="number" id="samplingInterval" value="1000" placeholder="1000">
+                    </div>
+                    <p><strong>📝 How to add variables:</strong></p>
+                    <ol style="font-size: 14px; margin-left: 20px;">
+                        <li>Create a subscription above</li>
+                        <li>Use Quick Subscribe below, OR</li>
+                        <li>Browse variables and click "Subscribe"</li>
+                    </ol>
+                </div>
+                <div>
+                    <div id="monitoringStatus" class="status info">Ready to monitor</div>
+                    
+                    <!-- Real-time Monitoring Controls -->
+                    <div class="action-buttons" style="margin: 10px 0;">
+                        <button onclick="connectWebSocket()" class="btn-action">🔌 Connect WebSocket</button>
+                        <button onclick="disconnectWebSocket()" class="btn-action">🔌 Disconnect</button>
+                    </div>
+                    <div class="action-buttons" style="margin: 10px 0;">
+                        <button onclick="readAllValues()" class="btn-action">📖 Read All Values</button>
+                        <button onclick="toggleWebSocketMode()" class="btn-action">🔄 Toggle Mode</button>
+                    </div>
+                    
+                    <div id="monitoringResponse" class="response-area"></div>
+                </div>
+            </div>
+            
+            <!-- Active Monitored Items -->
+            <div style="margin-top: 20px;">
+                <h3>Active Monitored Items</h3>
+                <div id="monitoredItemsList" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; background-color: #f8f9fa;">
+                    <div style="color: #666; font-style: italic;">No monitored items</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Subscribe -->
+        <div class="section">
+            <h2>⚡ Quick Subscribe</h2>
+            <p><strong>Directly subscribe to a variable by typing its NodeId:</strong></p>
+            <div class="two-column">
+                <div>
+                    <div class="form-group">
+                        <label for="quickSubscribeNodeId">Variable NodeId:</label>
+                        <input type="text" id="quickSubscribeNodeId" placeholder="ns=6;s=::AsGlobalPV:Application.Skill[0]">
+                    </div>
+                    <div class="form-group">
+                        <label for="quickSubscribeDisplayName">Display Name (optional):</label>
+                        <input type="text" id="quickSubscribeDisplayName" placeholder="Skill Status">
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="quickSubscribeVariable()" id="quickSubscribeBtn" disabled style="background-color: #007bff;">Quick Subscribe</button>
+                        <button onclick="quickReadVariable()" id="quickReadBtn" disabled style="background-color: #28a745;">Read First</button>
+                        <button onclick="populateQuickSubscribe('ns=6;s=::AsGlobalPV:Application.Skill[0]', 'Application Skill')" style="background-color: #6c757d;">Example 1</button>
+                        <button onclick="populateQuickSubscribe('ns=0;i=2258', 'Server Status')" style="background-color: #6c757d;">Example 2</button>
+                    </div>
+                    
+                    <div style="margin-top: 15px; padding: 10px; background-color: #e7f3ff; border-left: 4px solid #007bff; border-radius: 4px;">
+                        <h4 style="margin-top: 0; color: #007bff;">💡 Quick Tips:</h4>
+                        <ul style="margin-bottom: 0; font-size: 14px;">
+                            <li><strong>NodeId format:</strong> ns=6;s=::AsGlobalPV:Variable</li>
+                            <li><strong>Integer NodeIds:</strong> ns=0;i=2258</li>
+                            <li><strong>Read First:</strong> Test if variable exists before subscribing</li>
+                            <li><strong>Display Name:</strong> Give it a friendly name for easier identification</li>
+                        </ul>
+                    </div>
+                </div>
+                <div>
+                    <div id="quickSubscribeStatus" class="status info">Enter a NodeId to subscribe</div>
+                    <div id="quickSubscribeResponse" class="response-area"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recursive Structure Subscribe -->
+        <div class="section">
+            <h2>🌳 Subscribe to Structure (Recursive)</h2>
+            <p><strong>Subscribe to all variables within a structure automatically:</strong></p>
+            <div class="two-column">
+                <div>
+                    <div class="form-group">
+                        <label for="structureNodeId">Structure NodeId:</label>
+                        <input type="text" id="structureNodeId" placeholder="ns=6;s=::AsGlobalPV:Recipe" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label for="maxDepth">Max Depth:</label>
+                        <input type="number" id="maxDepth" value="5" min="1" max="10" style="width: 100px;">
+                        <small style="color: #666;">Levels deep to explore</small>
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button onclick="subscribeToStructureChildren()" id="structureSubscribeBtn" disabled style="background-color: #007bff;">🌳 Subscribe All</button>
+                        <button onclick="clearStructureSubscriptions()" id="clearStructureBtn" disabled style="background-color: #dc3545;">🗑️ Clear All</button>
+                        <button onclick="populateStructureExample('ns=6;s=::AsGlobalPV:Recipe')" style="background-color: #6c757d;">Example 1</button>
+                        <button onclick="populateStructureExample('ns=6;s=::AsGlobalPV:Application')" style="background-color: #6c757d;">Example 2</button>
+                    </div>
+                </div>
+                <div>
+                    <div id="structureStatus" class="status info">Select structure to explore</div>
+                    <div id="structureResponse" class="response-area"></div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 10px; background-color: #e7f3ff; border-left: 4px solid #007bff; border-radius: 4px;">
+                <h4 style="margin-top: 0; color: #007bff;">🌳 How Recursive Subscribe Works:</h4>
+                <ul style="margin-bottom: 0; font-size: 14px;">
+                    <li><strong>Discovery:</strong> Browses structure recursively to find all variables</li>
+                    <li><strong>Smart Batching:</strong> Groups subscriptions for better performance</li>
+                    <li><strong>Path Tracking:</strong> Shows full path for each variable (e.g., Recipe.Settings.Temperature)</li>
+                    <li><strong>Depth Control:</strong> Prevents infinite recursion with max depth limit</li>
+                    <li><strong>Batch Results:</strong> Shows success/failure for each variable found</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Browse Nodes -->
+        <div class="section">
+            <h2>🔍 Browse & Subscribe to Variables</h2>
+            <div class="form-group">
+                <label for="browseNodeId">Node ID to Browse:</label>
+                <input type="text" id="browseNodeId" value="ns=0;i=85" placeholder="ns=0;i=85 (Objects folder)">
+            </div>
+            <button onclick="browseNode()" id="browseBtn" disabled>Browse Node</button>
+            <div id="browseStatus" class="status info">Ready to browse</div>
+            <div id="browseResponse" class="response-area"></div>
+        </div>
+    </div>
+
+    <script src="api-test.js"></script>
+</body>
+</html>
