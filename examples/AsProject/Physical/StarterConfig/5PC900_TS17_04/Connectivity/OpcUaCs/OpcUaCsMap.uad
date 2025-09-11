@@ -8,6 +8,19 @@
     <EngineeringUnitAliases />
   </Aliases>
   <Module Name="&lt;Default&gt;">
+    <GlobalVariables Name="Global Variables">
+      <Variable Name="test" RecursiveEnable="2" />
+      <Variable Name="testarray" RecursiveEnable="2">
+        <Variable Name="TestOffsetArray">
+          <Variable Name="standard" RecursiveEnable="2" />
+          <Variable Name="offset" RecursiveEnable="2" />
+        </Variable>
+        <Variable Name="New_Member1">
+          <Variable Name="reals" RecursiveEnable="2" />
+          <Variable Name="ints" RecursiveEnable="2" />
+        </Variable>
+      </Variable>
+    </GlobalVariables>
     <Task Name="demo">
       <Variable Name="test" RecursiveEnable="2" />
     </Task>

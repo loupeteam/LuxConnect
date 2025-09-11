@@ -22,4 +22,18 @@ TYPE
 	TestStruct3 : 	STRUCT 
 		x : REAL;
 	END_STRUCT;
+	TestSimpleArray : 	STRUCT 
+		reals : ARRAY[0..2]OF REAL;
+		ints : ARRAY[0..2]OF INT;
+	END_STRUCT;
+	TestOffsetArray : 	STRUCT 
+		standard : ARRAY[0..2]OF REAL;
+		offset : ARRAY[1..3]OF REAL;
+	END_STRUCT;
+	TestArrays : 	STRUCT 
+		doubleArray : {REDUND_UNREPLICABLE} ARRAY[0..3,0..3]OF TestStruct2;
+		doubleArrayOffset : {REDUND_UNREPLICABLE} ARRAY[1..3,1..3]OF TestStruct2;
+		TestOffsetArray : TestOffsetArray;
+		New_Member1 : TestSimpleArray;
+	END_STRUCT;
 END_TYPE

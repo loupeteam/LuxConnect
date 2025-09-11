@@ -1,7 +1,7 @@
 
 PROGRAM _INIT
 	test;
-	 
+	testarray;	
 END_PROGRAM
 
 PROGRAM _CYCLIC

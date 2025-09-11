@@ -1,3 +1,4 @@
 VAR
+	testarray : TestArrays;
 	test : TestStruct;
 END_VAR
