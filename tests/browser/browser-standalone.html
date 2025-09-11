@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LuxConnect Browser Test</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px;
+        }
+        .test-result { 
+            padding: 10px; 
+            margin: 5px 0; 
+            border-radius: 4px;
+        }
+        .pass { 
+            background-color: #d4edda; 
+            color: #155724; 
+            border: 1px solid #c3e6cb;
+        }
+        .fail { 
+            background-color: #f8d7da; 
+            color: #721c24; 
+            border: 1px solid #f5c6cb;
+        }
+        .summary {
+            font-weight: bold;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>LuxConnect Browser Compatibility Test</h1>
+    <div id="test-results"></div>
+    <div id="test-summary"></div>
+
+    <!-- Load the built library -->
+    <script type="module">
+        import { OpcuaMachine } from '/dist/index.js';
+
+        // Simple test runner
+        class BrowserTestRunner {
+            constructor() {
+                this.results = [];
+                this.passed = 0;
+                this.failed = 0;
+            }
+
+            test(description, testFn) {
+                try {
+                    testFn();
+                    this.results.push({ description, status: 'pass' });
+                    this.passed++;
+                } catch (error) {
+                    this.results.push({ description, status: 'fail', error: error.message });
+                    this.failed++;
+                }
+            }
+
+            expect(actual) {
+                return {
+                    toBeDefined: () => {
+                        if (actual === undefined || actual === null) {
+                            throw new Error(`Expected value to be defined, but got ${actual}`);
+                        }
+                    },
+                    toBe: (expected) => {
+                        if (actual !== expected) {
+                            throw new Error(`Expected ${actual} to be ${expected}`);
+                        }
+                    },
+                    toMatch: (regex) => {
+                        if (!regex.test(actual)) {
+                            throw new Error(`Expected ${actual} to match ${regex}`);
+                        }
+                    }
+                };
+            }
+
+            render() {
+                const resultsDiv = document.getElementById('test-results');
+                const summaryDiv = document.getElementById('test-summary');
+                
+                resultsDiv.innerHTML = this.results.map(result => 
+                    `<div class="test-result ${result.status}">
+                        <strong>${result.status.toUpperCase()}:</strong> ${result.description}
+                        ${result.error ? `<br><small>Error: ${result.error}</small>` : ''}
+                    </div>`
+                ).join('');
+
+                summaryDiv.innerHTML = `
+                    <div class="summary">
+                        Test Summary: ${this.passed} passed, ${this.failed} failed, ${this.results.length} total
+                        <br>Browser Environment: ${navigator.userAgent}
+                        <br>WebSocket Support: ${typeof WebSocket !== 'undefined' ? 'Yes' : 'No'}
+                    </div>
+                `;
+            }
+        }
+
+        // Run browser-specific tests
+        const runner = new BrowserTestRunner();
+
+        // Test: Basic library loading
+        runner.test('Library should load in browser', () => {
+            runner.expect(OpcuaMachine).toBeDefined();
+        });
+
+        // Test: OpcuaMachine instantiation
+        runner.test('OpcuaMachine should instantiate in browser', () => {
+            const machine = new OpcuaMachine({ baseUrl: 'https://localhost:8443' });
+            runner.expect(machine).toBeDefined();
+        });
+
+        // Test: WebSocket availability
+        runner.test('WebSocket should be available', () => {
+            runner.expect(WebSocket).toBeDefined();
+        });
+
+        // Test: Variable registration
+        runner.test('Should register variables in browser', () => {
+            const machine = new OpcuaMachine({ baseUrl: 'https://localhost:8443' });
+            
+            // Should not throw
+            machine.initCyclicRead('Temperature');
+            
+            // Verify registration
+            const variable = machine['variableManager'].getVariable('Temperature');
+            runner.expect(variable).toBeDefined();
+            runner.expect(variable.name).toBe('Temperature');
+        });
+
+        // Test: Namespace handling
+        runner.test('Should handle default namespace in browser', () => {
+            const machine = new OpcuaMachine({ baseUrl: 'https://localhost:8443' });
+            machine.initCyclicRead('TestVar');
+            
+            const variable = machine['variableManager'].getVariable('TestVar');
+            runner.expect(variable.nodeId).toMatch(/^ns=5;s=/);
+        });
+
+        // Test: Platform detection
+        runner.test('Should detect browser environment', () => {
+            const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+            runner.expect(isBrowser).toBe(true);
+        });
+
+        // Render results
+        runner.render();
+
+        console.log('Browser test results:', {
+            passed: runner.passed,
+            failed: runner.failed,
+            results: runner.results
+        });
+    </script>
+</body>
+</html>

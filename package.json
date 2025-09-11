@@ -8,7 +8,14 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node --test dist/test/*.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest watch",
+    "test:node": "vitest run --project node",
+    "test:browser": "node scripts/serve-browser-tests.js",
+    "test:browser:open": "start http://localhost:8080 && node scripts/serve-browser-tests.js",
+    "test:validate": "node scripts/validate-browser-tests.js",
+    "test:coverage": "vitest run --coverage",
     "demo": "node examples/demo.js",
     "clean": "rimraf dist",
     "prepare": "npm run build"
@@ -25,8 +32,11 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.19.13",
+    "@vitest/browser": "^3.2.4",
+    "playwright": "^1.55.0",
     "rimraf": "^5.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@types/ws": "^8.5.0"
