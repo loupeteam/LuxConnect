@@ -26,39 +26,109 @@ export class VariablePathParser {
   
   /**
    * Parse a mapp Connect variable name into components
+   * Supports multiple formats:
+   * - 'VarName' → Global variable (AsGlobalPV scope)
+   * - 'TaskName:VarName' → Task local variable
+   * - '::TaskName:VarName' → Explicit task local format
+   * - '::AsGlobalPV:VarName' → Explicit global format
+   * - '::AppModule:TaskName:VarName' → Full explicit format
    */
   static parse(variableName: string): VariablePath {
-    // Split by :: to get application and task::variable parts
-    const mainParts = variableName.split('::');
-    if (mainParts.length !== 2) {
-      throw new Error(`Invalid variable name format: ${variableName}`);
+    // Handle different variable name formats
+    
+    // Check if it starts with :: (explicit format)
+    if (variableName.startsWith('::')) {
+      return this.parseExplicitFormat(variableName);
     }
+    
+    // Check if it contains a single : (task local)
+    const colonCount = (variableName.match(/:/g) || []).length;
+    if (colonCount === 1) {
+      return this.parseTaskLocalFormat(variableName);
+    }
+    
+    // No colons = global variable
+    if (colonCount === 0) {
+      return this.parseGlobalFormat(variableName);
+    }
+    
+    throw new Error(`Invalid variable name format: ${variableName}`);
+  }
 
-    const application = mainParts[0]; // Can be empty string
-    const taskVariablePart = mainParts[1];
-
-    // Split task:variable part
-    const taskVariableParts = taskVariablePart.split(':');
+  /**
+   * Parse explicit format: ::Application:Task:Variable or ::Task:Variable
+   */
+  private static parseExplicitFormat(variableName: string): VariablePath {
+    // Remove the leading ::
+    const withoutPrefix = variableName.substring(2);
+    const parts = withoutPrefix.split(':');
+    
+    let application = '';
     let task = '';
     let variableWithPath = '';
-
-    if (taskVariableParts.length === 1) {
-      // No task specified, this is the variable
-      variableWithPath = taskVariableParts[0];
-    } else if (taskVariableParts.length === 2) {
-      // Task:Variable format
-      task = taskVariableParts[0];
-      variableWithPath = taskVariableParts[1];
+    
+    if (parts.length === 1) {
+      // ::Variable (global in default app)
+      variableWithPath = parts[0];
+      task = 'AsGlobalPV';
+    } else if (parts.length === 2) {
+      // ::Task:Variable or ::AsGlobalPV:Variable
+      task = parts[0];
+      variableWithPath = parts[1];
+      
+      // If task is not AsGlobalPV, it's a task local variable
+      if (task !== 'AsGlobalPV') {
+        // This is actually a task local variable with explicit format
+        // Keep task as is
+      }
+    } else if (parts.length === 3) {
+      // ::Application:Task:Variable
+      application = parts[0];
+      task = parts[1];
+      variableWithPath = parts[2];
     } else {
-      throw new Error(`Invalid task:variable format in: ${variableName}`);
+      throw new Error(`Invalid explicit format: ${variableName}`);
     }
-
-    // Parse variable with potential structure path and array indices
+    
     const result = this.parseVariableWithPath(variableWithPath);
-
+    
     return {
       application,
       task,
+      variable: result.variable,
+      path: result.path,
+      arrayIndices: result.arrayIndices
+    };
+  }
+
+  /**
+   * Parse task local format: TaskName:Variable
+   */
+  private static parseTaskLocalFormat(variableName: string): VariablePath {
+    const parts = variableName.split(':');
+    const task = parts[0];
+    const variableWithPath = parts[1];
+    
+    const result = this.parseVariableWithPath(variableWithPath);
+    
+    return {
+      application: '', // Default application
+      task,
+      variable: result.variable,
+      path: result.path,
+      arrayIndices: result.arrayIndices
+    };
+  }
+
+  /**
+   * Parse global format: Variable (no colons)
+   */
+  private static parseGlobalFormat(variableName: string): VariablePath {
+    const result = this.parseVariableWithPath(variableName);
+    
+    return {
+      application: '', // Default application
+      task: 'AsGlobalPV', // Global scope
       variable: result.variable,
       path: result.path,
       arrayIndices: result.arrayIndices
