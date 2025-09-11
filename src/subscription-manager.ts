@@ -308,8 +308,12 @@ export class SubscriptionManager {
   /**
    * Get hierarchy path for subscription consolidation using static parser
    * Uses VariablePathParser for consistent parsing across the entire system
+   * 
+   * @param variableName - The variable name to parse
+   * @returns Array representing the hierarchical path
+   * @public For testing and external tools that need variable hierarchy information
    */
-  private getHierarchyPathFromVariableName(variableName: string): string[] {
+  public getHierarchyPathFromVariableName(variableName: string): string[] {
     try {
       // Use the proper VariablePathParser for consistent results
       const parsedPath = VariablePathParser.parse(variableName);
@@ -345,8 +349,13 @@ export class SubscriptionManager {
 
   /**
    * Find variable name by nodeId in the hierarchy map
+   * 
+   * @param nodeId - The OPC UA node ID to search for
+   * @param variableHierarchy - The hierarchy map to search in
+   * @returns Variable name if found, undefined otherwise
+   * @public For debugging and external tools that need reverse node ID lookups
    */
-  private findVariableNameByNodeId(
+  public findVariableNameByNodeId(
     nodeId: string, 
     variableHierarchy: Map<string, { nodeId: string; path: string[] }>
   ): string | undefined {

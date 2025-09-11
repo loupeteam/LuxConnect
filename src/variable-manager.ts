@@ -35,10 +35,21 @@ export class VariableManager {
     }
 
     // Check if already registered
-    if (this.hierarchy.getVariable(name)) {
-      // TODO: Consider if we should allow re-registration with different nodeId
-      // TODO: Add option to update existing variable's nodeId
-      throw new Error(`Variable '${name}' is already registered`);
+    const existingVar = this.hierarchy.getVariable(name);
+    if (existingVar && existingVar.mapping.nodeId !== nodeId) {
+      throw new Error(`Variable '${name}' is already registered with different nodeId '${existingVar.mapping.nodeId}'`);
+    }
+    
+    // If variable exists with same nodeId, return existing variable
+    if (existingVar) {
+      return {
+        name: existingVar.mapping.name,
+        nodeId: existingVar.mapping.nodeId,
+        value: existingVar.value,
+        timestamp: existingVar.timestamp,
+        quality: existingVar.quality,
+        ...(existingVar.mapping.dataType && { dataType: existingVar.mapping.dataType })
+      };
     }
 
     // Use default values - real values will come from subscription updates
