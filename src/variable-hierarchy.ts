@@ -7,8 +7,7 @@ export interface VariablePath {
   application: string;
   task: string;
   variable: string;
-  path: string[];  // For structure navigation like ['SubStruct', 'Element']
-  arrayIndices: number[][]; // For array access like [[2], [3,4]] for nested arrays
+  path: string[];  // For structure navigation like ['SubStruct', 'Element', '[0]']
 }
 
 export interface VariableMapping {
@@ -98,8 +97,7 @@ export class VariablePathParser {
       application,
       task,
       variable: result.variable,
-      path: result.path,
-      arrayIndices: result.arrayIndices
+      path: result.path
     };
   }
 
@@ -117,8 +115,7 @@ export class VariablePathParser {
       application: '', // Default application
       task,
       variable: result.variable,
-      path: result.path,
-      arrayIndices: result.arrayIndices
+      path: result.path
     };
   }
 
@@ -132,8 +129,7 @@ export class VariablePathParser {
       application: '', // Default application
       task: 'AsGlobalPV', // Global scope
       variable: result.variable,
-      path: result.path,
-      arrayIndices: result.arrayIndices
+      path: result.path
     };
   }
 
@@ -143,38 +139,54 @@ export class VariablePathParser {
   private static parseVariableWithPath(variableWithPath: string): {
     variable: string;
     path: string[];
-    arrayIndices: number[][];
   } {
     const path: string[] = [];
-    const arrayIndices: number[][] = [];
     
     // Split by dots to get structure path
     const parts = variableWithPath.split('.');
-    const variable = parts[0];
+    
+    // Extract the clean variable name (remove any array indices from the first part)
+    let variable = parts[0];
+    const rootArrayMatches = variable.match(/\[([^\]]+)\]/g);
+    if (rootArrayMatches) {
+      // Extract array indices from root variable and add to path
+      for (const match of rootArrayMatches) {
+        // Add array indices to path with brackets (clearer representation)
+        path.push(match); // Keep the full [0,1] format
+      }
+      // Clean the variable name
+      variable = variable.replace(/\[[^\]]+\]/g, '');
+    }
     
     // Process each part for array indices and structure navigation
-    for (let i = 0; i < parts.length; i++) {
+    for (let i = 1; i < parts.length; i++) {
       let part = parts[i];
       
-      // Extract array indices from this part
+      // Extract array indices from this part and add them to path
       const arrayMatches = part.match(/\[([^\]]+)\]/g);
       if (arrayMatches) {
-        for (const match of arrayMatches) {
-          const indexStr = match.slice(1, -1); // Remove [ ]
-          const indices = indexStr.split(',').map(s => parseInt(s.trim()));
-          arrayIndices.push(indices);
-        }
-        // Remove array indices from part name
+        // Remove array indices from part name first
         part = part.replace(/\[[^\]]+\]/g, '');
-      }
-      
-      // Add to path (except for the root variable)
-      if (i > 0 && part) {
-        path.push(part);
+        
+        // Add the part name to path
+        if (part) {
+          path.push(part);
+        }
+        
+        // Add each array index bracket as a separate path segment
+        for (const match of arrayMatches) {
+          // Add array indices to path with brackets (e.g., "[0,1]")
+          path.push(match); // Keep the full [0,1] format
+        }
+      } else {
+        // Add to path
+        if (part) {
+          path.push(part);
+        }
       }
     }
 
-    return { variable, path, arrayIndices };
+    return { variable, path };
   }
 
   /**
@@ -198,16 +210,44 @@ export class VariablePathParser {
     // Add base variable
     statePath.push(parsedPath.variable);
     
-    // Add structure path
+    // Add structure path (which already includes array indices as string segments)
     statePath.push(...parsedPath.path);
     
-    // For simplicity, we'll handle array indices by treating them as string keys
-    // e.g., [2,3] becomes "2,3"
-    for (const indices of parsedPath.arrayIndices) {
-      statePath.push(indices.join(','));
-    }
+    // Note: Array indices are already included in the path, so we don't add them separately
+    // This avoids duplication while maintaining backward compatibility
     
     return statePath;
+  }
+
+  /**
+   * Reconstruct the original variable name from parsed components
+   * Useful for debugging and validation
+   */
+  static reconstruct(parsedPath: VariablePath): string {
+    let result = '';
+    
+    // Add application prefix if present
+    if (parsedPath.application && parsedPath.task) {
+      result += `::${parsedPath.application}:${parsedPath.task}:`;
+    } else if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
+      result += `${parsedPath.task}:`;
+    }
+    
+    // Add base variable name
+    result += parsedPath.variable;
+    
+    // Add path segments
+    for (const segment of parsedPath.path) {
+      if (segment.startsWith('[') && segment.endsWith(']')) {
+        // Array index - append directly (no dot)
+        result += segment;
+      } else {
+        // Property name - append with dot
+        result += '.' + segment;
+      }
+    }
+    
+    return result;
   }
 }
 

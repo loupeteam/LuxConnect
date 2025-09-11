@@ -179,7 +179,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         task: 'MyTask', 
         variable: 'Temperature',
         path: ['Value'],
-        arrayIndices: []
       });
 
       const result = subscriptionManager.getHierarchyPathFromVariableName(variableName);
@@ -196,7 +195,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         task: 'AsGlobalPV',
         variable: 'Temperature',
         path: [],
-        arrayIndices: []
       });
 
       const result = subscriptionManager.getHierarchyPathFromVariableName(variableName);
@@ -214,7 +212,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         task: 'MyTask',
         variable: 'LocalVar',
         path: [],
-        arrayIndices: []
       });
 
       const result = subscriptionManager.getHierarchyPathFromVariableName(variableName);
@@ -230,7 +227,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         task: 'AsGlobalPV',
         variable: 'Motor',
         path: ['Status', 'Running'],
-        arrayIndices: []
       });
 
       const result = subscriptionManager.getHierarchyPathFromVariableName(variableName);
@@ -378,7 +374,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         task: 'App',
         variable: 'Motor',
         path: ['Status', '0', 'Running'],
-        arrayIndices: []
       });
 
       const hierarchyPath = subscriptionManager.getHierarchyPathFromVariableName(variableName);
