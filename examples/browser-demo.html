@@ -303,6 +303,7 @@
                     username: document.getElementById('username').value,
                     password: document.getElementById('password').value
                 });
+                machine.setDefaultNamespace('ns=5;s=');
 
                 // Set up event handlers
                 machine.onConnectionStateChanged((state) => {
@@ -508,6 +509,49 @@
             }
         });
 
+        connect();
+
+        // Test different variable name formats after connection
+        setTimeout(() => {
+            if (machine) {
+                log('🧪 Testing different variable name formats:');
+                
+                // Task local variables (single colon)
+                log('📍 Task local: Twincat:TestVar');
+                machine.initCyclicRead('Twincat:TestVar', (value) => {
+                    log(`  └─ Twincat:TestVar = ${value}`);
+                });
+                
+                // Explicit task local format
+                log('📍 Explicit task local: ::Twincat:TestVar');
+                machine.initCyclicRead('::Twincat:TestVar', (value) => {
+                    log(`  └─ ::Twincat:TestVar = ${value}`);
+                });
+                
+                // Global variables (no colons)
+                log('🌍 Global: gTwincat');
+                machine.initCyclicRead('gTwincat', (value) => {
+                    log(`  └─ gTwincat = ${value}`);
+                });
+                
+                // Global with structure
+                log('🌍 Global structure: gTwincat.ToTwincat');
+                machine.initCyclicRead('gTwincat.ToTwincat', (value) => {
+                    log(`  └─ gTwincat.ToTwincat = ${value}`);
+                });
+                
+                // Explicit global format
+                log('🌍 Explicit global: ::AsGlobalPV:gTwincat.ToTwincat');
+                machine.initCyclicRead('::AsGlobalPV:gTwincat.ToTwincat', (value) => {
+                    log(`  └─ ::AsGlobalPV:gTwincat.ToTwincat = ${value}`);
+                });
+                
+                log('✅ All variable formats registered for cyclic reading');
+                
+                // Enable subscriptions to start receiving data
+                machine.setReadGroupEnable('default', true);
+            }
+        }, 2000); // Wait 2 seconds after connection
     </script>
 </body>
 </html>
