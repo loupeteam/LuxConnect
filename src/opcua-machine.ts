@@ -36,9 +36,9 @@ export class OpcuaMachine {
   private connection: OpcuaConnection;
   private variableManager: VariableManager;
   private subscriptionManager: SubscriptionManager;
-  private defaultNamespace: string = 'ns=1;s=';
+  private defaultNamespace: string = 'ns=5;s=';
   private readGroups = new Map<string, ReadGroupInfo>();
-  private pendingVariables = new Map<string, string>(); // varName -> nodeId for deferred registration
+  private subscriptionUpdateTimers = new Map<string, NodeJS.Timeout>();
 
   // Index signature for dynamic property access (lux.js style)
   [key: string]: any;
@@ -52,8 +52,8 @@ export class OpcuaMachine {
     this.readGroups.set('default', {
       name: 'default',
       options: {
-        publishingInterval: 1000,
-        samplingInterval: 1000,
+        publishingInterval: 100,
+        samplingInterval: 100,
         enabled: true
       },
       variables: new Set(),
@@ -128,18 +128,13 @@ export class OpcuaMachine {
    * Connect to the OPC UA server
    */
   public async connect(): Promise<void> {
+    // TODO: Add connection retry logic with exponential backoff
+    // TODO: Add connection timeout handling
     await this.connection.connect();
     
-    // Register all pending variables with VariableManager
-    for (const [varName, nodeId] of this.pendingVariables) {
-      try {
-        await this.variableManager.registerVariable(varName, nodeId);
-      } catch (error) {
-        console.warn(`Failed to register variable ${varName}:`, error);
-      }
-    }
-    
-    // Create subscriptions for read groups
+    // All variables should already be registered from initCyclicRead calls
+    // Just create subscriptions for read groups that have variables
+    // TODO: Consider parallelizing subscription creation for better performance
     for (const [name, group] of this.readGroups) {
       if (group.variables.size > 0 && group.options.enabled) {
         await this.createOrUpdateSubscription(name);
@@ -151,6 +146,12 @@ export class OpcuaMachine {
    * Disconnect from the OPC UA server
    */
   public async disconnect(): Promise<void> {
+    // Clear any pending subscription update timers
+    for (const timer of this.subscriptionUpdateTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.subscriptionUpdateTimers.clear();
+    
     await this.connection.disconnect();
   }
 
@@ -199,25 +200,33 @@ export class OpcuaMachine {
     // Build nodeId
     const nodeId = this.buildNodeId(varName, options);
     
-    // Store for deferred registration
-    this.pendingVariables.set(varName, nodeId);
+    // Register variable immediately - no need to wait for connection
+    // This will validate the variable name and add it to the hierarchy with default values
+    if (!this.variableManager.getVariable(varName)) {
+      try {
+        this.variableManager.registerVariable(varName, nodeId);
+      } catch (error) {
+        console.warn(`Failed to register variable ${varName}:`, error);
+        // TODO: Add error handling strategy - should we throw or continue?
+        // TODO: Consider collecting failed registrations for retry after connection
+      }
+    }
+    
+    // Check if this is a new variable for the read group
+    const group = this.readGroups.get(readGroup)!;
+    const isNewVariable = !group.variables.has(varName);
     
     // Add to read group
-    const group = this.readGroups.get(readGroup)!;
     group.variables.add(varName);
-    
-    // Register with VariableManager if connected
-    if (this.isConnected) {
-      this.variableManager.registerVariable(varName, nodeId).catch(console.error);
-    }
     
     // Set up callback if provided
     if (callback) {
+      // Register callback immediately - we'll handle it even if variable registration is pending
       this.onChange(varName, callback);
     }
     
-    // Update subscription if connected
-    if (this.isConnected && group.options.enabled) {
+    // Update subscription only if this is a new variable and we're connected
+    if (this.isConnected && group.options.enabled && isNewVariable) {
       this.createOrUpdateSubscription(readGroup);
     }
   }
@@ -271,7 +280,7 @@ export class OpcuaMachine {
     let variable = this.variableManager.getVariable(varName);
     if (!variable) {
       const nodeId = this.buildNodeId(varName, options);
-      variable = await this.variableManager.registerVariable(varName, nodeId);
+      variable = this.variableManager.registerVariable(varName, nodeId);
     }
     
     return await this.variableManager.readValue(varName);
@@ -285,7 +294,7 @@ export class OpcuaMachine {
     let variable = this.variableManager.getVariable(varName);
     if (!variable) {
       const nodeId = this.buildNodeId(varName, options);
-      variable = await this.variableManager.registerVariable(varName, nodeId);
+      variable = this.variableManager.registerVariable(varName, nodeId);
     }
     
     await this.variableManager.writeValue(varName, value);
@@ -422,6 +431,8 @@ export class OpcuaMachine {
     
     if (!data) return undefined;
     
+    // TODO: Consider caching proxy objects to improve performance
+    // TODO: Add support for nested object access beyond 3 levels
     return new Proxy(data, {
       get: (obj, prop: string | symbol) => {
         if (typeof prop !== 'string') return undefined;
@@ -487,48 +498,58 @@ export class OpcuaMachine {
   }
 
   private async createOrUpdateSubscription(readGroupName: string): Promise<void> {
+    // Debounce subscription updates to avoid race conditions
+    const existingTimer = this.subscriptionUpdateTimers.get(readGroupName);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(async () => {
+      this.subscriptionUpdateTimers.delete(readGroupName);
+      await this.doCreateOrUpdateSubscription(readGroupName);
+    }, 100); // 100ms debounce
+
+    this.subscriptionUpdateTimers.set(readGroupName, timer);
+  }
+
+  private async doCreateOrUpdateSubscription(readGroupName: string): Promise<void> {
     const group = this.readGroups.get(readGroupName);
     if (!group || !group.options.enabled || group.variables.size === 0) {
       return;
     }
 
-    // Delete existing subscription if it exists
-    if (group.subscriptionId !== null) {
-      await this.deleteSubscription(readGroupName);
-    }
+    try {
+      // Delete existing subscription if it exists
+      if (group.subscriptionId !== null) {
+        await this.deleteSubscription(readGroupName);
+      }
 
-    // Ensure all variables are registered first
-    for (const varName of group.variables) {
-      const nodeId = this.pendingVariables.get(varName);
-      if (nodeId && !this.variableManager.getVariable(varName)) {
+      // All variables should already be registered from initCyclicRead calls
+      // No need to check pendingVariables since registration happens immediately
+
+      // Create subscription via SubscriptionManager
+      const subscriptionOptions = {
+        publishingInterval: group.options.publishingInterval || 1000,
+        maxNotificationsPerPublish: group.options.maxNotificationsPerPublish || 10,
+        priority: group.options.priority || 0,
+        lifetimeCount: 3000,
+        maxKeepAliveCount: 10
+      };
+
+      const subscriptionName = await this.subscriptionManager.createOrUpdateSubscription(readGroupName, subscriptionOptions);
+      const subscriptionInfo = this.subscriptionManager.getSubscription(subscriptionName);
+      group.subscriptionId = subscriptionInfo?.subscriptionId || null;
+
+      // Add all variables to the subscription
+      for (const varName of group.variables) {
         try {
-          await this.variableManager.registerVariable(varName, nodeId);
+          await this.subscriptionManager.addVariable(readGroupName, varName);
         } catch (error) {
-          console.warn(`Failed to register variable ${varName}:`, error);
+          console.warn(`Failed to add variable ${varName} to subscription:`, error);
         }
       }
-    }
-
-    // Create subscription via SubscriptionManager
-    const subscriptionOptions = {
-      publishingInterval: group.options.publishingInterval || 1000,
-      maxNotificationsPerPublish: group.options.maxNotificationsPerPublish || 10,
-      priority: group.options.priority || 0,
-      lifetimeCount: 3000,
-      maxKeepAliveCount: 10
-    };
-
-    const subscriptionName = await this.subscriptionManager.createSubscription(readGroupName, subscriptionOptions);
-    const subscriptionInfo = this.subscriptionManager.getSubscription(subscriptionName);
-    group.subscriptionId = subscriptionInfo?.subscriptionId || null;
-
-    // Add all variables to the subscription
-    for (const varName of group.variables) {
-      try {
-        await this.subscriptionManager.addVariable(readGroupName, varName);
-      } catch (error) {
-        console.warn(`Failed to add variable ${varName} to subscription:`, error);
-      }
+    } catch (error) {
+      console.error(`Failed to create/update subscription '${readGroupName}':`, error);
     }
   }
 

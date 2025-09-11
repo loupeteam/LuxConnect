@@ -153,12 +153,15 @@ export class OpcuaConnection {
     // Close WebSocket
     this.webSocketManager.close();
 
+    // TODO: Add graceful shutdown timeout to prevent hanging
+    // TODO: Clean up any pending API requests
     // Delete session
     if (this.sessionInfo) {
       try {
         await this.deleteSession();
       } catch (error) {
         // Ignore errors during cleanup
+        // TODO: Log cleanup errors for debugging
       }
     }
 
@@ -313,6 +316,9 @@ export class OpcuaConnection {
   private categorizeConnectionError(error: Error, url: string): Error {
     const errorMsg = error.message.toLowerCase();
     
+    // TODO: Add more specific error detection patterns
+    // TODO: Consider adding error codes for programmatic handling
+    // TODO: Add support for different error messages in multiple languages
     if (errorMsg.includes('certificate') || errorMsg.includes('ssl') || errorMsg.includes('tls') || 
         errorMsg.includes('authority') || errorMsg.includes('net::err_cert') || 
         errorMsg.includes('sec_error') || errorMsg.includes('insecure')) {
@@ -572,6 +578,8 @@ Auth data: ${JSON.stringify(authData)}`);
     const url = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo!.sessionId}`;
     console.log(`Deleting mapp Connect session at: ${url}`);
     
+    // TODO: Add timeout for delete request to prevent hanging
+    // TODO: Handle specific HTTP error codes (404 if already deleted, etc.)
     await fetch(url, {
       method: 'DELETE',
       headers: {

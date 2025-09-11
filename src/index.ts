@@ -40,11 +40,6 @@ export { OpcuaMachine } from './opcua-machine.js';
 // Core functionality classes
 export { OpcuaConnection } from './connection.js';
 
-// Legacy classes for backwards compatibility  
-export { OpcuaClient } from './opcua-client.js';
-export { VariableManager } from './variable-manager.js';
-export { SubscriptionManager } from './subscription-manager.js';
-
 // Type definitions
 export type {
   ConnectionConfig,
@@ -62,15 +57,10 @@ export { ConnectionState } from './types.js';
 
 // Convenience factory functions
 import { OpcuaMachine } from './opcua-machine.js';
-import { OpcuaClient } from './opcua-client.js';
 import type { ConnectionConfig } from './types.js';
 
 export function createOpcuaMachine(config: ConnectionConfig): OpcuaMachine {
   return new OpcuaMachine(config);
-}
-
-export function createOpcuaClient(config: ConnectionConfig): OpcuaClient {
-  return new OpcuaClient(config);
 }
 
 // Version information

@@ -1,5 +1,6 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
+import { VariablePathParser } from './variable-hierarchy.js';
 import { 
   SubscriptionOptions, 
   MonitoredItemOptions
@@ -9,6 +10,8 @@ interface SubscriptionInfo {
   subscriptionId: number;
   name: string;
   monitoredItems: Map<number, MonitoredItemInfo>;
+  desiredVariables: Set<string>; // Variables we want to monitor
+  actualNodeIds: Set<string>;    // NodeIds we're actually monitoring
 }
 
 interface MonitoredItemInfo {
@@ -46,6 +49,31 @@ export class SubscriptionManager {
       throw new Error(`Subscription '${name}' already exists`);
     }
 
+    return this.doCreateSubscription(name, options);
+  }
+
+  /**
+   * Create or update a named subscription (handles existing subscriptions gracefully)
+   */
+  public async createOrUpdateSubscription(
+    name: string, 
+    options: SubscriptionOptions = {}
+  ): Promise<string> {
+    // If subscription exists, delete it first
+    if (this.subscriptions.has(name)) {
+      await this.deleteSubscription(name);
+    }
+
+    return this.doCreateSubscription(name, options);
+  }
+
+  /**
+   * Internal method to create a subscription
+   */
+  private async doCreateSubscription(
+    name: string, 
+    options: SubscriptionOptions = {}
+  ): Promise<string> {
     const subscriptionParams = {
       publishingInterval: options.publishingInterval || 1000,
       maxNotificationsPerPublish: options.maxNotificationsPerPublish || 10,
@@ -69,7 +97,9 @@ export class SubscriptionManager {
     const subscriptionInfo: SubscriptionInfo = {
       subscriptionId: result.subscriptionId,
       name,
-      monitoredItems: new Map()
+      monitoredItems: new Map(),
+      desiredVariables: new Set(),
+      actualNodeIds: new Set()
     };
 
     this.subscriptions.set(name, subscriptionInfo);
@@ -100,11 +130,12 @@ export class SubscriptionManager {
 
   /**
    * Add a variable to a subscription by variable name (lux.js style)
+   * Handles hierarchical relationships and prevents duplicates
    */
   public async addVariable(
     subscriptionName: string, 
     variableName: string, 
-    options: MonitoredItemOptions = {}
+    _options: MonitoredItemOptions = {}
   ): Promise<void> {
     const subscription = this.subscriptions.get(subscriptionName);
     if (!subscription) {
@@ -116,23 +147,18 @@ export class SubscriptionManager {
       throw new Error(`Variable '${variableName}' is not registered`);
     }
 
-    await this.addMonitoredItem(subscription, variable.nodeId, options, variableName);
-  }
-
-  /**
-   * Add a node to a subscription by nodeId
-   */
-  public async addNode(
-    subscriptionName: string, 
-    nodeId: string, 
-    options: MonitoredItemOptions = {}
-  ): Promise<void> {
-    const subscription = this.subscriptions.get(subscriptionName);
-    if (!subscription) {
-      throw new Error(`Subscription '${subscriptionName}' not found`);
+    // Check if variable is already desired to avoid redundant operations
+    if (subscription.desiredVariables.has(variableName)) {
+      return;
     }
 
-    await this.addMonitoredItem(subscription, nodeId, options);
+    // TODO: Add batch operation support for adding multiple variables at once
+    // TODO: Consider rate limiting for rapid successive variable additions
+    // Add to desired variables
+    subscription.desiredVariables.add(variableName);
+
+    // Consolidate and update subscription
+    await this.consolidateSubscription(subscription);
   }
 
   /**
@@ -144,24 +170,217 @@ export class SubscriptionManager {
       throw new Error(`Subscription '${subscriptionName}' not found`);
     }
 
-    const variable = this.variableManager.getVariable(variableName);
-    if (!variable) {
-      throw new Error(`Variable '${variableName}' is not registered`);
-    }
+    // Remove from desired variables
+    subscription.desiredVariables.delete(variableName);
 
-    await this.removeMonitoredItem(subscription, variable.nodeId);
+    // Consolidate and update subscription
+    await this.consolidateSubscription(subscription);
   }
 
   /**
-   * Remove a node from a subscription
+   * Consolidate subscription based on hierarchical relationships
+   * - If parent is desired, don't subscribe to children
+   * - If children are desired but parent is added, remove children and add parent
+   * - Avoid duplicate subscriptions
+   * 
+   * Each subscription maintains its own variable list for proper isolation,
+   * but leverages VariableManager for consistent parsing
    */
-  public async removeNode(subscriptionName: string, nodeId: string): Promise<void> {
-    const subscription = this.subscriptions.get(subscriptionName);
-    if (!subscription) {
-      throw new Error(`Subscription '${subscriptionName}' not found`);
+  private async consolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
+    // Build hierarchy map for THIS subscription's variables only
+    const subscriptionHierarchy = new Map<string, { nodeId: string; path: string[] }>();
+
+    // Use VariableManager's data and VariablePathParser for consistent parsing
+    for (const varName of subscription.desiredVariables) {
+      const variable = this.variableManager.getVariable(varName);
+      if (variable) {
+        // Use VariablePathParser static method for consistent parsing
+        const hierarchyPath = this.getHierarchyPathFromVariableName(varName);
+        
+        subscriptionHierarchy.set(varName, {
+          nodeId: variable.nodeId,
+          path: hierarchyPath
+        });
+      }
     }
 
-    await this.removeMonitoredItem(subscription, nodeId);
+    // Determine optimal set of nodeIds to subscribe to for THIS subscription
+    const consolidatedNodeIds = this.findOptimalSubscriptionSet(subscriptionHierarchy);
+
+    // Calculate what needs to be added/removed
+    const toAdd = Array.from(consolidatedNodeIds).filter(nodeId => !subscription.actualNodeIds.has(nodeId));
+    const toRemove = Array.from(subscription.actualNodeIds).filter(nodeId => !consolidatedNodeIds.has(nodeId));
+
+    // Remove obsolete monitored items
+    for (const nodeId of toRemove) {
+      await this.removeMonitoredItemByNodeId(subscription, nodeId);
+      subscription.actualNodeIds.delete(nodeId);
+    }
+
+    // Add new monitored items
+    for (const nodeId of toAdd) {
+      // Find the variable name for this nodeId
+      const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
+      await this.addMonitoredItem(subscription, nodeId, {}, varName);
+      subscription.actualNodeIds.add(nodeId);
+    }
+  }
+
+  /**
+   * Find optimal set of nodeIds to subscribe to based on hierarchy
+   */
+  private findOptimalSubscriptionSet(variableHierarchy: Map<string, { nodeId: string; path: string[] }>): Set<string> {
+    const result = new Set<string>();
+    const processed = new Set<string>();
+
+    // Sort variables by path depth (parents first)
+    const sortedVars = Array.from(variableHierarchy.entries())
+      .sort(([, a], [, b]) => a.path.length - b.path.length);
+
+    for (const [varName, info] of sortedVars) {
+      if (processed.has(varName)) continue;
+
+      // Check if any parent is already included
+      const hasParentIncluded = this.hasParentInSet(info.path, result, variableHierarchy);
+      
+      if (!hasParentIncluded) {
+        // Add this variable
+        result.add(info.nodeId);
+        processed.add(varName);
+
+        // Mark all children as processed (they're covered by this parent)
+        this.markChildrenAsProcessed(info.path, variableHierarchy, processed);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if any parent of the given path is already in the result set
+   */
+  private hasParentInSet(
+    path: string[], 
+    resultSet: Set<string>, 
+    variableHierarchy: Map<string, { nodeId: string; path: string[] }>
+  ): boolean {
+    // Check all possible parent paths
+    for (let i = 0; i < path.length; i++) {
+      const parentPath = path.slice(0, i);
+      
+      // Find if any variable in hierarchy matches this parent path
+      for (const [, info] of variableHierarchy) {
+        if (this.arraysEqual(info.path, parentPath) && resultSet.has(info.nodeId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Mark all children of the given path as processed
+   */
+  private markChildrenAsProcessed(
+    parentPath: string[],
+    variableHierarchy: Map<string, { nodeId: string; path: string[] }>,
+    processed: Set<string>
+  ): void {
+    for (const [varName, info] of variableHierarchy) {
+      if (this.isChildPath(parentPath, info.path)) {
+        processed.add(varName);
+      }
+    }
+  }
+
+  /**
+   * Check if childPath is a child of parentPath
+   */
+  private isChildPath(parentPath: string[], childPath: string[]): boolean {
+    if (childPath.length <= parentPath.length) return false;
+    
+    for (let i = 0; i < parentPath.length; i++) {
+      if (parentPath[i] !== childPath[i]) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Get hierarchy path for subscription consolidation using static parser
+   * Uses VariablePathParser for consistent parsing across the entire system
+   */
+  private getHierarchyPathFromVariableName(variableName: string): string[] {
+    try {
+      // Use the proper VariablePathParser for consistent results
+      const parsedPath = VariablePathParser.parse(variableName);
+      
+      // Convert VariablePath to simple hierarchy path for subscription consolidation
+      // This represents the logical hierarchy depth for parent/child optimization
+      const hierarchyParts: string[] = [];
+      
+      // Add application if present
+      if (parsedPath.application) {
+        hierarchyParts.push(parsedPath.application);
+      }
+      
+      // Add task if not the default AsGlobalPV
+      if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
+        hierarchyParts.push(parsedPath.task);
+      }
+      
+      // Add the variable name
+      hierarchyParts.push(parsedPath.variable);
+      
+      // Add any structure path elements
+      hierarchyParts.push(...parsedPath.path);
+      
+      return hierarchyParts;
+    } catch (error) {
+      // Fallback to simple parsing if VariablePathParser fails
+      console.warn(`Failed to parse variable name '${variableName}' with VariablePathParser, using fallback:`, error);
+      const parts = variableName.split('.');
+      return parts.slice(1); // Remove the first part
+    }
+  }
+
+  /**
+   * Find variable name by nodeId in the hierarchy map
+   */
+  private findVariableNameByNodeId(
+    nodeId: string, 
+    variableHierarchy: Map<string, { nodeId: string; path: string[] }>
+  ): string | undefined {
+    // TODO: Consider indexing by nodeId for better performance (O(1) vs O(n))
+    for (const [varName, info] of variableHierarchy) {
+      if (info.nodeId === nodeId) {
+        return varName;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Remove monitored item by nodeId
+   */
+  private async removeMonitoredItemByNodeId(subscription: SubscriptionInfo, nodeId: string): Promise<void> {
+    // Find the monitored item with this nodeId
+    for (const [, monitoredItem] of subscription.monitoredItems) {
+      if (monitoredItem.nodeId === nodeId) {
+        await this.removeMonitoredItem(subscription, nodeId);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Check if two arrays are equal
+   */
+  private arraysEqual(arr1: string[], arr2: string[]): boolean {
+    if (arr1.length !== arr2.length) return false;
+    for (let i = 0; i < arr1.length; i++) {
+      if (arr1[i] !== arr2[i]) return false;
+    }
+    return true;
   }
 
   /**

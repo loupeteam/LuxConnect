@@ -5,9 +5,9 @@ import {
   VariableChangeHandler 
 } from './types.js';
 import { 
-  SimpleVariableHierarchy, 
+  VariableHierarchy, 
   VariablePathParser
-} from './simple-variable-hierarchy.js';
+} from './variable-hierarchy.js';
 
 /**
  * Simplified variable manager using global state with deep copying
@@ -15,7 +15,7 @@ import {
  */
 export class VariableManager {
   private connection: OpcuaConnection;
-  private hierarchy = new SimpleVariableHierarchy();
+  private hierarchy = new VariableHierarchy();
   private changeHandlers = new Map<string, VariableChangeHandler[]>();
   private globalChangeHandlers: VariableChangeHandler[] = [];
 
@@ -26,7 +26,7 @@ export class VariableManager {
   /**
    * Register a variable with format validation
    */
-  public async registerVariable(name: string, nodeId: string): Promise<OpcuaVariable> {
+  public registerVariable(name: string, nodeId: string): OpcuaVariable {
     // Validate variable name format
     try {
       VariablePathParser.parse(name);
@@ -36,6 +36,8 @@ export class VariableManager {
 
     // Check if already registered
     if (this.hierarchy.getVariable(name)) {
+      // TODO: Consider if we should allow re-registration with different nodeId
+      // TODO: Add option to update existing variable's nodeId
       throw new Error(`Variable '${name}' is already registered`);
     }
 
@@ -164,6 +166,9 @@ export class VariableManager {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
+    // TODO: Add write queue to handle concurrent writes properly
+    // TODO: Add write confirmation callback or event
+    // TODO: Validate value type against variable's dataType if available
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(varData.mapping.nodeId)}/attributes/Value`, {
       method: 'PUT',
       body: JSON.stringify({
