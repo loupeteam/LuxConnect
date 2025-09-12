@@ -5,7 +5,7 @@
     <Selector ID="WebServerProtocol">
       <Property ID="WebServerPortSsl" Value="8443" />
       <Property ID="Interface" Value="All" />
-      <Property ID="SSLConfiguration" />
+      <Property ID="SSLConfiguration" Value="" />
     </Selector>
     <Group ID="WebServerEndpointConfiguration">
       <Group ID="Endpoint[1]">

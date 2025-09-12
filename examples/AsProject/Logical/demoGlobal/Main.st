@@ -1,6 +1,6 @@
 
 PROGRAM _INIT
-	test;
+	gtest;
 	testarray;	
 END_PROGRAM
 

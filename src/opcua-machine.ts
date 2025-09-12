@@ -1,6 +1,7 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
 import { SubscriptionManager } from './subscription-manager.js';
+import { VariablePathParser } from './variable-hierarchy.js';
 import { 
   ConnectionConfig, 
   ConnectionState, 
@@ -37,6 +38,8 @@ export class OpcuaMachine {
   private variableManager: VariableManager;
   private subscriptionManager: SubscriptionManager;
   private defaultNamespace: string = 'ns=5;s=';
+  private defaultApplication: string = ''; // Empty means use parser default
+  private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
   private readGroups = new Map<string, ReadGroupInfo>();
   private subscriptionUpdateTimers = new Map<string, NodeJS.Timeout>();
 
@@ -308,6 +311,20 @@ export class OpcuaMachine {
   }
 
   /**
+   * Set default application/module for variables without explicit application
+   */
+  public setDefaultApplication(application: string): void {
+    this.defaultApplication = application;
+  }
+
+  /**
+   * Set default task for variables without explicit task
+   */
+  public setDefaultTask(task: string): void {
+    this.defaultTask = task;
+  }
+
+  /**
    * Add change handler for a variable
    */
   public onChange(varName: string, callback: (value: any) => void): void {
@@ -472,14 +489,41 @@ export class OpcuaMachine {
       return options.nodeId;
     }
     
-    // If varName already has namespace, use as-is
+    // If varName already has OPC UA namespace prefix, use as-is
     if (varName.includes('ns=') || varName.includes('i=') || varName.includes('s=')) {
       return varName;
     }
     
+    // Parse the variable name to ensure it's in proper module::task:variable format
+    let normalizedVarName: string;
+    try {
+      const parsedPath = VariablePathParser.parse(varName);
+      
+      // Apply defaults if missing application or task
+      if (!parsedPath.application && this.defaultApplication) {
+        parsedPath.application = this.defaultApplication;
+      }
+      
+      if (!parsedPath.task || parsedPath.task === 'AsGlobalPV') {
+        if (this.defaultTask && this.defaultTask !== 'AsGlobalPV') {
+          parsedPath.task = this.defaultTask;
+        }
+      }
+      
+      // Reconstruct the normalized variable name
+      normalizedVarName = VariablePathParser.reconstruct(parsedPath);
+      
+      // TODO: Consider adding configuration for required module/task validation
+      // TODO: Add validation for server-specific naming requirements
+    } catch (error) {
+      console.warn(`Failed to parse variable name '${varName}':`, error);
+      // Fallback to original name if parsing fails
+      normalizedVarName = varName;
+    }
+    
     // Use custom namespace or default
     const namespace = options.namespace || this.defaultNamespace;
-    return namespace + varName;
+    return namespace + normalizedVarName;
   }
 
   private ensureReadGroup(name: string): void {

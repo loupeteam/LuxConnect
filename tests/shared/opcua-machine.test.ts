@@ -28,7 +28,7 @@ describe('OpcuaMachine (Cross-Platform)', () => {
       // Variable should be registered even without connection - access via variableManager
       const variable = machine['variableManager'].getVariable('Temperature')
       expect(variable).toBeDefined()
-      expect(variable?.name).toBe('Temperature')
+      expect(variable?.name).toBe('::AsGlobalPV:Temperature') // Normalized name
     })
 
     it('should register hierarchical variables', () => {

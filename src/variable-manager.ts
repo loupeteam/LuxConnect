@@ -34,8 +34,11 @@ export class VariableManager {
       throw new Error(`Invalid variable name format '${name}': ${error}`);
     }
 
+    // Normalize the variable name for consistent storage
+    const normalizedName = this.normalizeVariableName(name);
+
     // Check if already registered
-    const existingVar = this.hierarchy.getVariable(name);
+    const existingVar = this.hierarchy.getVariable(normalizedName);
     if (existingVar && existingVar.mapping.nodeId !== nodeId) {
       throw new Error(`Variable '${name}' is already registered with different nodeId '${existingVar.mapping.nodeId}'`);
     }
@@ -60,9 +63,9 @@ export class VariableManager {
       dataType: undefined
     };
     
-    // Add to hierarchy
+    // Add to hierarchy using normalized name
     this.hierarchy.addVariable(
-      name,
+      normalizedName,
       nodeId,
       variableInfo.value,
       variableInfo.timestamp,
@@ -72,7 +75,7 @@ export class VariableManager {
 
     // Convert to OpcuaVariable format for backward compatibility
     const namedVariable: OpcuaVariable = {
-      name,
+      name: normalizedName,
       nodeId,
       value: variableInfo.value,
       timestamp: variableInfo.timestamp,
@@ -87,7 +90,8 @@ export class VariableManager {
    * Get a registered variable by name
    */
   public getVariable(name: string): OpcuaVariable | undefined {
-    const varData = this.hierarchy.getVariable(name);
+    const normalizedName = this.normalizeVariableName(name);
+    const varData = this.hierarchy.getVariable(normalizedName);
     if (!varData) return undefined;
 
     return {
@@ -124,9 +128,11 @@ export class VariableManager {
    * Unregister a variable
    */
   public unregisterVariable(name: string): boolean {
-    const removed = this.hierarchy.removeVariable(name);
+    const normalizedName = this.normalizeVariableName(name);
+    const removed = this.hierarchy.removeVariable(normalizedName);
     if (removed) {
-      this.changeHandlers.delete(name);
+      // Clean up change handlers using normalized name
+      this.changeHandlers.delete(normalizedName);
     }
     return removed;
   }
@@ -135,7 +141,8 @@ export class VariableManager {
    * Read the current value of a variable by name
    */
   public async readValue(name: string): Promise<any> {
-    const varData = this.hierarchy.getVariable(name);
+    const normalizedName = this.normalizeVariableName(name);
+    const varData = this.hierarchy.getVariable(normalizedName);
     if (!varData) {
       throw new Error(`Variable '${name}' is not registered`);
     }
@@ -146,7 +153,7 @@ export class VariableManager {
 
     const result = await response.json();
     
-    if (result.statusCode?.value !== 0) {
+    if (result.status?.code !== 0) {
       throw new Error(`Failed to read variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
     }
 
@@ -155,7 +162,7 @@ export class VariableManager {
     const timestamp = new Date(result.serverTimestamp || Date.now());
     const quality = this.mapQualityCode(result.statusCode?.value || 0);
 
-    const affectedVariables = this.hierarchy.updateVariable(name, newValue, timestamp, quality);
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
     
     // Emit change events for all affected variables
     for (const affectedName of affectedVariables) {
@@ -172,7 +179,8 @@ export class VariableManager {
    * Write a value to a variable by name
    */
   public async writeValue(name: string, value: any): Promise<void> {
-    const varData = this.hierarchy.getVariable(name);
+    const normalizedName = this.normalizeVariableName(name);
+    const varData = this.hierarchy.getVariable(normalizedName);
     if (!varData) {
       throw new Error(`Variable '${name}' is not registered`);
     }
@@ -189,14 +197,14 @@ export class VariableManager {
 
     const result = await response.json();
     
-    if (result.statusCode?.value !== 0) {
+    if (result.status?.code !== 0) {
       throw new Error(`Failed to write variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
     }
 
     // Update hierarchy
     const timestamp = new Date();
     const quality = this.mapQualityCode(result.statusCode?.value || 0);
-    const affectedVariables = this.hierarchy.updateVariable(name, value, timestamp, quality);
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, value, timestamp, quality);
     
     // Emit change events for all affected variables
     for (const affectedName of affectedVariables) {
@@ -211,15 +219,18 @@ export class VariableManager {
    * Add a change handler for a specific variable
    */
   public onChange(name: string, handler: VariableChangeHandler): void {
-    if (!this.hierarchy.getVariable(name)) {
+    // Use normalized name for both checking registration and storing handlers
+    const normalizedName = this.normalizeVariableName(name);
+    
+    if (!this.hierarchy.getVariable(normalizedName)) {
       throw new Error(`Variable '${name}' is not registered`);
     }
 
-    if (!this.changeHandlers.has(name)) {
-      this.changeHandlers.set(name, []);
+    if (!this.changeHandlers.has(normalizedName)) {
+      this.changeHandlers.set(normalizedName, []);
     }
     
-    this.changeHandlers.get(name)!.push(handler);
+    this.changeHandlers.get(normalizedName)!.push(handler);
   }
 
   /**
@@ -233,7 +244,9 @@ export class VariableManager {
    * Remove a change handler for a specific variable
    */
   public removeChangeHandler(name: string, handler: VariableChangeHandler): void {
-    const handlers = this.changeHandlers.get(name);
+    // Use normalized name as key for change handlers lookup
+    const normalizedName = this.normalizeVariableName(name);
+    const handlers = this.changeHandlers.get(normalizedName);
     if (handlers) {
       const index = handlers.indexOf(handler);
       if (index > -1) {
@@ -249,6 +262,21 @@ export class VariableManager {
     const index = this.globalChangeHandlers.indexOf(handler);
     if (index > -1) {
       this.globalChangeHandlers.splice(index, 1);
+    }
+  }
+
+  /**
+   * Normalize variable name to ensure consistent key usage
+   * This ensures that variable names like 'Temperature', '::AsGlobalPV:Temperature', 'gtest', '::gtest' 
+   * are all treated consistently when used as keys for change handlers
+   */
+  private normalizeVariableName(name: string): string {
+    try {
+      const parsedPath = VariablePathParser.parse(name);
+      return VariablePathParser.reconstruct(parsedPath);
+    } catch (error) {
+      // If parsing fails, return the original name as fallback
+      return name;
     }
   }
 
@@ -276,7 +304,8 @@ export class VariableManager {
    * Get variables that are related to the given variable
    */
   public getRelatedVariables(name: string): Array<{ type: 'parent' | 'child' | 'sibling'; variable: OpcuaVariable }> {
-    const related = this.hierarchy.findRelatedVariables(name);
+    const normalizedName = this.normalizeVariableName(name);
+    const related = this.hierarchy.findRelatedVariables(normalizedName);
     
     return related.map(rel => {
       const varData = this.hierarchy.getVariable(rel.variable);
@@ -310,6 +339,8 @@ export class VariableManager {
     const varData = this.hierarchy.getVariable(name);
     if (!varData) return;
 
+    const normalizedName = this.normalizeVariableName(name);
+
     const changeEvent: VariableChangeEvent = {
       nodeId: varData.mapping.nodeId,
       name,
@@ -318,8 +349,8 @@ export class VariableManager {
       quality
     };
 
-    // Emit to specific variable handlers
-    const handlers = this.changeHandlers.get(name);
+    // Emit to specific variable handlers using normalized name as key
+    const handlers = this.changeHandlers.get(normalizedName);
     if (handlers) {
       handlers.forEach(handler => {
         try {

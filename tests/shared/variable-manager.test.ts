@@ -16,7 +16,7 @@ describe('VariableManager (Cross-Platform)', () => {
     it('should register valid variables', () => {
       const variable = variableManager.registerVariable('Temperature', mockNodeIds.Temperature)
       
-      expect(variable.name).toBe('Temperature')
+      expect(variable.name).toBe('::AsGlobalPV:Temperature') // Normalized name
       expect(variable.nodeId).toBe(mockNodeIds.Temperature)
       expect(variable.value).toBeUndefined()
       expect(variable.quality).toBe('unknown')
@@ -50,7 +50,7 @@ describe('VariableManager (Cross-Platform)', () => {
       
       const retrieved = variableManager.getVariable('Temperature')
       expect(retrieved).toBeDefined()
-      expect(retrieved?.name).toBe('Temperature')
+      expect(retrieved?.name).toBe('::AsGlobalPV:Temperature') // Normalized name
       expect(retrieved?.nodeId).toBe(mockNodeIds.Temperature)
     })
 

@@ -9,24 +9,16 @@
   </Aliases>
   <Module Name="&lt;Default&gt;">
     <GlobalVariables Name="Global Variables">
-      <Variable Name="test" RecursiveEnable="2" />
-      <Variable Name="testarray" RecursiveEnable="2">
-        <Variable Name="TestOffsetArray">
-          <Variable Name="standard" RecursiveEnable="2" />
-          <Variable Name="offset" RecursiveEnable="2" />
-        </Variable>
-        <Variable Name="New_Member1">
-          <Variable Name="reals" RecursiveEnable="2" />
-          <Variable Name="ints" RecursiveEnable="2" />
-        </Variable>
-      </Variable>
+      <Variable Name="gtest" RecursiveEnable="2" />
+      <Variable Name="testarray" RecursiveEnable="2" />
     </GlobalVariables>
-    <Task Name="demo">
-      <Variable Name="test" RecursiveEnable="2" />
-    </Task>
-    <Task Name="demoGlobal" />
     <Task Name="Page">
       <Variable Name="MyVar" RecursiveEnable="2" />
+    </Task>
+    <Task Name="demoGlobal" />
+    <Task Name="demo">
+      <Variable Name="test" RecursiveEnable="2" />
+      <Variable Name="test_arrays" RecursiveEnable="2" />
     </Task>
   </Module>
 </OpcUaSource>

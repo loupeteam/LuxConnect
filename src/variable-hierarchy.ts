@@ -28,16 +28,15 @@ export class VariablePathParser {
    * Supports multiple formats:
    * - 'VarName' → Global variable (AsGlobalPV scope)
    * - 'TaskName:VarName' → Task local variable
-   * - '::TaskName:VarName' → Explicit task local format
-   * - '::AsGlobalPV:VarName' → Explicit global format
-   * - '::AppModule:TaskName:VarName' → Full explicit format
+   * - '::TaskName:VarName' → Task local with empty module
+   * - 'AppModule::TaskName:VarName' → Full format (module::task:variable)
    */
   static parse(variableName: string): VariablePath {
     // Handle different variable name formats
     
-    // Check if it starts with :: (explicit format)
-    if (variableName.startsWith('::')) {
-      return this.parseExplicitFormat(variableName);
+    // Check for format with :: separator (AppModule::TaskName:Variable or ::TaskName:Variable)
+    if (variableName.includes('::')) {
+      return this.parseModuleTaskFormat(variableName);
     }
     
     // Check if it contains a single : (task local)
@@ -55,50 +54,49 @@ export class VariablePathParser {
   }
 
   /**
-   * Parse explicit format: ::Application:Task:Variable or ::Task:Variable
+   * Parse module::task format: AppModule::TaskName:Variable, ::TaskName:Variable, or ::GlobalVariable
    */
-  private static parseExplicitFormat(variableName: string): VariablePath {
-    // Remove the leading ::
-    const withoutPrefix = variableName.substring(2);
-    const parts = withoutPrefix.split(':');
+  private static parseModuleTaskFormat(variableName: string): VariablePath {
+    // Split by :: to separate module and task:variable parts
+    const parts = variableName.split('::');
     
-    let application = '';
-    let task = '';
-    let variableWithPath = '';
-    
-    // TODO: Add validation for empty parts after splitting
-    // TODO: Add support for escaping colons in variable names
-    if (parts.length === 1) {
-      // ::Variable (global in default app)
-      variableWithPath = parts[0];
-      task = 'AsGlobalPV';
-    } else if (parts.length === 2) {
-      // ::Task:Variable or ::AsGlobalPV:Variable
-      task = parts[0];
-      variableWithPath = parts[1];
-      
-      // If task is not AsGlobalPV, it's a task local variable
-      if (task !== 'AsGlobalPV') {
-        // This is actually a task local variable with explicit format
-        // Keep task as is
-      }
-    } else if (parts.length === 3) {
-      // ::Application:Task:Variable
-      application = parts[0];
-      task = parts[1];
-      variableWithPath = parts[2];
-    } else {
-      throw new Error(`Invalid explicit format: ${variableName}`);
+    if (parts.length !== 2) {
+      throw new Error(`Invalid module::task format: ${variableName}`);
     }
     
-    const result = this.parseVariableWithPath(variableWithPath);
+    const application = parts[0]; // Can be empty string
+    const taskAndVariable = parts[1];
     
-    return {
-      application,
-      task,
-      variable: result.variable,
-      path: result.path
-    };
+    // Check if there's a colon in the second part
+    if (taskAndVariable.includes(':')) {
+      // Format: AppModule::Task:Variable or ::Task:Variable
+      const taskVariableParts = taskAndVariable.split(':');
+      if (taskVariableParts.length !== 2) {
+        throw new Error(`Invalid task:variable format in: ${taskAndVariable}`);
+      }
+      
+      const task = taskVariableParts[0];
+      const variableWithPath = taskVariableParts[1];
+      
+      const result = this.parseVariableWithPath(variableWithPath);
+      
+      return {
+        application,
+        task,
+        variable: result.variable,
+        path: result.path
+      };
+    } else {
+      // Format: ::GlobalVariable (no colon, treat as global)
+      const result = this.parseVariableWithPath(taskAndVariable);
+      
+      return {
+        application, // Will be empty string for ::GlobalVariable
+        task: 'AsGlobalPV', // Global variables use AsGlobalPV task
+        variable: result.variable,
+        path: result.path
+      };
+    }
   }
 
   /**
@@ -221,17 +219,13 @@ export class VariablePathParser {
 
   /**
    * Reconstruct the original variable name from parsed components
-   * Useful for debugging and validation
+   * Always uses the full AppModule::Task:Variable format
    */
   static reconstruct(parsedPath: VariablePath): string {
     let result = '';
     
-    // Add application prefix if present
-    if (parsedPath.application && parsedPath.task) {
-      result += `::${parsedPath.application}:${parsedPath.task}:`;
-    } else if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
-      result += `${parsedPath.task}:`;
-    }
+    // Always use the full module::task:variable format
+    result += `${parsedPath.application}::${parsedPath.task}:`;
     
     // Add base variable name
     result += parsedPath.variable;

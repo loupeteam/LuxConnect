@@ -40,11 +40,44 @@ describe('VariablePathParser (Cross-Platform)', () => {
     })
 
     it('should parse full explicit format', () => {
-      const result = VariablePathParser.parse('::AppModule:TaskMain:MotorData')
+      const result = VariablePathParser.parse('AppModule::TaskMain:MotorData')
       
       expect(result.variable).toBe('MotorData')
       expect(result.task).toBe('TaskMain')
       expect(result.application).toBe('AppModule')
+    })
+
+    it('should handle global variable with :: prefix', () => {
+      const result = VariablePathParser.parse('::gtest')
+      expect(result.application).toBe('')
+      expect(result.task).toBe('AsGlobalPV')
+      expect(result.variable).toBe('gtest')
+      expect(result.path).toEqual([])
+      
+      const reconstructed = VariablePathParser.reconstruct(result)
+      expect(reconstructed).toBe('::AsGlobalPV:gtest')
+    })
+
+    it('should handle global variable with struct path and :: prefix', () => {
+      const result = VariablePathParser.parse('::gtest.struct2')
+      expect(result.application).toBe('')
+      expect(result.task).toBe('AsGlobalPV')
+      expect(result.variable).toBe('gtest')
+      expect(result.path).toEqual(['struct2'])
+      
+      const reconstructed = VariablePathParser.reconstruct(result)
+      expect(reconstructed).toBe('::AsGlobalPV:gtest.struct2')
+    })
+
+    it('should handle global variable with nested struct path and :: prefix', () => {
+      const result = VariablePathParser.parse('::gtest.struct2.value')
+      expect(result.application).toBe('')
+      expect(result.task).toBe('AsGlobalPV')
+      expect(result.variable).toBe('gtest')
+      expect(result.path).toEqual(['struct2', 'value'])
+      
+      const reconstructed = VariablePathParser.reconstruct(result)
+      expect(reconstructed).toBe('::AsGlobalPV:gtest.struct2.value')
     })
   })
 
@@ -132,18 +165,20 @@ describe('VariablePathParser (Cross-Platform)', () => {
   describe('reconstruction', () => {
     it('should perfectly reconstruct simple variables', () => {
       const original = 'Temperature'
+      const expected = '::AsGlobalPV:Temperature'
       const parsed = VariablePathParser.parse(original)
       const reconstructed = VariablePathParser.reconstruct(parsed)
       
-      expect(reconstructed).toBe(original)
+      expect(reconstructed).toBe(expected)
     })
 
     it('should perfectly reconstruct task variables', () => {
       const original = 'TaskMain:Speed'
+      const expected = '::TaskMain:Speed'
       const parsed = VariablePathParser.parse(original)
       const reconstructed = VariablePathParser.reconstruct(parsed)
       
-      expect(reconstructed).toBe(original)
+      expect(reconstructed).toBe(expected)
     })
 
     it('should perfectly reconstruct array variables', () => {
@@ -160,15 +195,16 @@ describe('VariablePathParser (Cross-Platform)', () => {
       testCases.forEach(original => {
         const parsed = VariablePathParser.parse(original)
         const reconstructed = VariablePathParser.reconstruct(parsed)
-        expect(reconstructed).toBe(original)
+        // Array variables should become full format with empty app and AsGlobalPV task
+        expect(reconstructed).toBe(`::AsGlobalPV:${original}`)
       })
     })
 
     it('should perfectly reconstruct explicit format variables', () => {
       const testCases = [
-        { input: '::AsGlobalPV:Temperature', expected: 'Temperature' }, // Simplified form
-        { input: '::TaskMain:Speed', expected: 'TaskMain:Speed' }, // Task form
-        { input: '::AppModule:TaskName:Variable[1,2,3].Sub[4].Final', expected: '::AppModule:TaskName:Variable[1,2,3].Sub[4].Final' } // Full form
+        { input: '::AsGlobalPV:Temperature', expected: '::AsGlobalPV:Temperature' }, // Simplified form
+        { input: '::TaskMain:Speed', expected: '::TaskMain:Speed' }, // Task form
+        { input: 'AppModule::TaskName:Variable[1,2,3].Sub[4].Final', expected: 'AppModule::TaskName:Variable[1,2,3].Sub[4].Final' } // Full form
       ]
       
       testCases.forEach(({ input, expected }) => {

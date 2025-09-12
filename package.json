@@ -16,7 +16,7 @@
     "test:browser:open": "start http://localhost:8080 && node scripts/serve-browser-tests.js",
     "test:validate": "node scripts/validate-browser-tests.js",
     "test:coverage": "vitest run --coverage",
-    "demo": "node examples/demo.js",
+    "demo": "node scripts/serve-demo.js",
     "clean": "rimraf dist",
     "prepare": "npm run build"
   },

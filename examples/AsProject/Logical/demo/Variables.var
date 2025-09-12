@@ -1,4 +1,11 @@
 VAR
 	test_arrays : TestArrays;
 	test : TestStruct;
+	cycle_counter : DINT := 0;
+	random_selector : DINT := 0;
+	byte_ref : REFERENCE TO USINT;
+	word_ref : REFERENCE TO UINT;
+	dword_ref : REFERENCE TO UDINT;
+	offset : UDINT;
+	structure_size : UDINT;
 END_VAR

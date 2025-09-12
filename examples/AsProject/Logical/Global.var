@@ -1,4 +1,4 @@
 VAR
 	testarray : TestArrays;
-	test : TestStruct;
+	gtest : TestStruct;
 END_VAR
