@@ -21,6 +21,8 @@ function updateButtons(connected) {
     document.getElementById('addVariableBtn').disabled = !connected;
     document.getElementById('readBtn').disabled = !connected;
     document.getElementById('writeBtn').disabled = !connected;
+    document.getElementById('writeArrayBtn').disabled = !connected;
+    document.getElementById('logicDemoBtn').disabled = !connected;
 }
 
 window.testConnection = async function() {
@@ -165,17 +167,17 @@ window.disconnect = async function() {
 window.addVariable = function() {
     if (machine) {
         try {
-            log('Adding Temperature variable...');
+            log('Adding TestStruct variable...');
             machine.setDefaultNamespace('ns=5;s=');
-            machine.initCyclicRead('::Demo:test', (value) => {
-                log(`🌡️ Temperature changed: ${value}°C`);
-                updateVariableDisplay('Temperature', value);
+            machine.initCyclicRead('::demo:test', (value) => {
+                log(`📊 TestStruct changed: ${JSON.stringify(value, null, 2)}`);
+                updateVariableDisplay('TestStruct', JSON.stringify(value, null, 2));
             });
-            log('✅ Temperature variable added to cyclic reading');
+            log('✅ TestStruct variable added to cyclic reading');
             
             // Update variables display
             const variablesDiv = document.getElementById('variables');
-            variablesDiv.innerHTML = '<div class="variable">Temperature: <span id="tempValue">-</span>°C</div>';
+            variablesDiv.innerHTML = '<div class="variable">TestStruct: <span id="tempValue">-</span></div>';
             
         } catch (error) {
             log(`❌ Failed to add variable: ${error.message}`);
@@ -186,10 +188,8 @@ window.addVariable = function() {
 window.readVariable = async function() {
     if (machine) {
         try {
-            log('Reading Temperature variable...');
-            const value = await machine.readVariable('Temperature');
-            log(`📖 Temperature (explicit read): ${value}°C`);
-            updateVariableDisplay('Temperature', value);
+            const value = await machine.readVariable('::demo:test_arrays.testArrayStruct[0]');
+            log(`📖 Read ::demo:test_arrays.testArrayStruct[0]: ${JSON.stringify(value)}`);
         } catch (error) {
             log(`❌ Read failed: ${error.message}`);
         }
@@ -199,17 +199,305 @@ window.readVariable = async function() {
 window.writeVariable = async function() {
     if (machine) {
         try {
-            log('Writing Temperature = 25.5...');
-            await machine.writeVariable('Temperature', 25.5);
-            log('✅ Temperature written successfully');
+            log('📝 Complex Object Writing Demo');
+            log('==============================');
             
-            // Also try direct property access
-            log('Setting Temperature via direct property access...');
-            machine.Temperature = 26.0;
-            log('✅ Temperature set via property access');
+            // Example of complex object that should be decomposed into individual writes
+            // Using actual TestStruct structure from the Automation Studio project
+            const complexValue = {
+                command: 42,
+                slider: 75.5,
+                random: true,
+                struct1: {
+                    member1: 100,
+                    member2: 'Hello World'
+                },
+                struct2: {
+                    member1: 200,
+                    member2: 'Complex Test'
+                },
+                struct3: {
+                    member1: 300,
+                    member2: 'Third Struct'
+                },
+                myvalue: 999.99
+            };
+            
+            log('Complex TestStruct object to write:');
+            log(`${JSON.stringify(complexValue, null, 2)}`);
+            log('');
+            log('This will be automatically decomposed into individual variable writes:');
+            log('  - ::demo:test.command = 42');
+            log('  - ::demo:test.slider = 75.5');
+            log('  - ::demo:test.random = true');
+            log('  - ::demo:test.struct1.member1 = 100');
+            log('  - ::demo:test.struct1.member2 = "Hello World"');
+            log('  - ::demo:test.struct2.member1 = 200');
+            log('  - ::demo:test.struct2.member2 = "Complex Test"');
+            log('  - ::demo:test.struct3.member1 = 300');
+            log('  - ::demo:test.struct3.member2 = "Third Struct"');
+            log('  - ::demo:test.myvalue = 999.99');
+            log('');
+            
+            await machine.writeVariable('::demo:test', complexValue);
+            log('✅ Complex TestStruct written successfully using batch write');
+            log('');
+            
+            // Also test simple value write to a global variable
+            log('📊 Simple Value Writing Demo');
+            log('============================');
+            log('Writing simple value to global gtest.myvalue = 25.5...');
+            await machine.writeVariable('gtest.myvalue', 25.5);
+            log('✅ Global variable written successfully');
+            log('');
+            
+            // Test different primitive types using actual TestStruct fields
+            log('🔢 Primitive Types Demo');
+            log('======================');
+            
+            log('Writing boolean: ::demo:test.random = true');
+            await machine.writeVariable('::demo:test.random', true);
+            log('✅ Boolean written');
+            
+            log('Writing string: ::demo:test.struct1.member2 = "Demo System"');
+            await machine.writeVariable('::demo:test.struct1.member2', 'Demo System');
+            log('✅ String written');
+            
+            log('Writing integer: ::demo:test.command = 42');
+            await machine.writeVariable('::demo:test.command', 42);
+            log('✅ Integer written');
+            
+            log('Writing float: ::demo:test.slider = 88.8');
+            await machine.writeVariable('::demo:test.slider', 88.8);
+            log('✅ Float written');
+            
+            log('🎯 All write demos completed successfully!');
             
         } catch (error) {
             log(`❌ Write failed: ${error.message}`);
+            console.error('Detailed error:', error);
+        }
+    }
+};
+
+window.writeArrayVariable = async function() {
+    if (machine) {
+        try {
+            log('🔢 Array Element Writing Demo');
+            log('============================');
+            
+            // Demo 1: Write primitive values to array elements using actual TestArrays structure
+            log('1️⃣ Writing primitive values to array elements:');
+            
+            log('   Writing ::demo:test_arrays.testArrayStruct[0].member1 = 100');
+            await machine.writeVariable('::demo:test_arrays.testArrayStruct[0].member1', 100);
+            log('   ✅ Primitive array element written (read-modify-write approach)');
+            
+            log('   Writing ::demo:test_arrays.testArrayStruct[1].member1 = 200');
+            await machine.writeVariable('::demo:test_arrays.testArrayStruct[1].member1', 200);
+            log('   ✅ Another primitive array element written');
+            
+            // Demo 2: Write complex objects to array elements
+            log('2️⃣ Writing complex objects to array elements:');
+            
+            const complexObject = {
+                member1: 999,
+                member2: 'Complex Array Element'
+            };
+            
+            log('   Complex object to write:');
+            log(`   ${JSON.stringify(complexObject, null, 6)}`);
+            log('   Writing ::demo:test_arrays.testArrayStruct[0] = complexObject');
+            
+            await machine.writeVariable('::demo:test_arrays.testArrayStruct[0]', complexObject);
+            log('   ✅ Complex object written (property decomposition approach)');
+            log('     This was decomposed into individual property writes:');
+            log('     - ::demo:test_arrays.testArrayStruct[0].member1 = 999');
+            log('     - ::demo:test_arrays.testArrayStruct[0].member2 = "Complex Array Element"');
+            
+            // Demo 3: Write to 2D array of complex structures (TestArrays.doubleArray is ARRAY[0..3,0..3] OF TestStruct2)
+            log('3️⃣ Writing to 2D array of complex structures:');
+            
+            log('   Writing ::demo:test_arrays.doubleArray[0,0] = {member1: 100, member2: "Complex [0,0]"}');
+            await machine.writeVariable('::demo:test_arrays.doubleArray[0,0]', {
+                member1: 100,
+                member2: 'Complex [0,0]',
+                member3: 'First element'
+            });
+            log('   ✅ Complex structure written to 2D array element (property decomposition)');
+            
+            log('   Writing ::demo:test_arrays.doubleArray[1,2] = {member1: 120, member2: "Complex [1,2]"}');
+            await machine.writeVariable('::demo:test_arrays.doubleArray[1,2]', {
+                member1: 120,
+                member2: 'Complex [1,2]',
+                member3: 'Second element'
+            });
+            log('   ✅ Another complex structure written to 2D array element');
+            
+            // Demo 4: Mixed operations with 2D complex array
+            log('4️⃣ Mixed operations demo:');
+            
+            // Write entire 2D array structure
+            log('   Writing 2D array structure: ::demo:test_arrays.doubleArray[0] (entire row)');
+            const arrayRow = [
+                {member1: 10, member2: 'Row0 Col0', member3: 'R0C0'},
+                {member1: 11, member2: 'Row0 Col1', member3: 'R0C1'},
+                {member1: 12, member2: 'Row0 Col2', member3: 'R0C2'},
+                {member1: 13, member2: 'Row0 Col3', member3: 'R0C3'}
+            ];
+            await machine.writeVariable('::demo:test_arrays.doubleArray[0]', arrayRow);
+            log('   ✅ Entire 2D array row written (complex structure decomposition)');
+            
+            // Then modify individual elements within the row
+            log('   Modifying individual elements within the row:');
+            await machine.writeVariable('::demo:test_arrays.doubleArray[0,0]', {
+                member1: 999,
+                member2: 'Modified Element',
+                member3: 'Updated'
+            });
+            log('   ✅ doubleArray[0,0] = {member1: 999, ...}');
+            
+            await machine.writeVariable('::demo:test_arrays.doubleArray[0,3]', {
+                member1: 777,
+                member2: 'Last Element',
+                member3: 'Final'
+            });
+            log('   ✅ doubleArray[0,3] = {member1: 777, ...}');
+            
+            // Demo 5: Global 2D array operations
+            log('5️⃣ Global 2D array operations:');
+            
+            log('   Writing to global testarray.doubleArray[2,1] = {member1: 777, member2: "Global 2D"}');
+            await machine.writeVariable('testarray.doubleArray[2,1]', {
+                member1: 777,
+                member2: 'Global 2D Element',
+                member3: 'Global structure'
+            });
+            log('   ✅ Global 2D array element written');
+            
+            log('   Writing to global testarray.testArrayStruct[1].member2 = "Global Test"');
+            await machine.writeVariable('testarray.testArrayStruct[1].member2', 'Global Test');
+            log('   ✅ Global struct array member written');
+            
+            log('🎉 Array element writing demo completed!');
+            log('');
+            log('📋 Summary of approaches used:');
+            log('   • Primitive values → Read-modify-write (efficient for simple updates)');
+            log('   • Complex objects → Property decomposition (consistent with OPC UA)');
+            log('   • 2D arrays → Multi-dimensional indexing with complex structures');
+            log('   • Library automatically chooses the right approach based on value type');
+            log('   • Works with both task-local (::demo:) and global variables');
+            
+        } catch (error) {
+            log(`❌ Array write demo failed: ${error.message}`);
+            console.error('Detailed error:', error);
+        }
+    }
+};
+
+window.runLogicDemo = async function() {
+    if (machine) {
+        try {
+            log('🧠 Simplified Array Element Logic Demo');
+            log('=====================================');
+            log('This demo shows how the library automatically chooses the right approach');
+            log('based on BOTH the variable name pattern AND the value type.');
+            log('');
+            
+            // Case 1: Array element + primitive value → writeArrayElement (read-modify-write)
+            log('1️⃣ CASE: Array Element + Primitive Value');
+            log('   Operation: machine.writeVariable("::demo:test_arrays.testArrayStruct[0].member1", 123)');
+            log('   Decision:  Array pattern detected + primitive value → writeSingleValue()');
+            log('   Method:    Direct write approach (single property)');
+            log('   Steps:     1. Write value directly to specific property');
+            
+            await machine.writeVariable('::demo:test_arrays.testArrayStruct[0].member1', 123);
+            log('   ✅ Completed using direct write');
+            log('');
+            
+            // Case 2: Array element + complex value → writeComplexValue (property decomposition)
+            log('2️⃣ CASE: 2D Array Element + Complex Object');
+            log('   Operation: machine.writeVariable("::demo:test_arrays.doubleArray[0,1]", {member1: 1, member2: "test"})');
+            log('   Decision:  Array pattern detected + complex value → writeComplexValue()');
+            log('   Method:    Property decomposition approach');
+            log('   Steps:     1. Flatten object into individual properties');
+            log('              2. Write each property individually:');
+            log('                 - ::demo:test_arrays.doubleArray[0,1].member1 = 1');
+            log('                 - ::demo:test_arrays.doubleArray[0,1].member2 = "test"');
+            
+            const complexObject = { member1: 777, member2: 'logic demo', member3: 'complex 2D' };
+            await machine.writeVariable('::demo:test_arrays.doubleArray[0,1]', complexObject);
+            log('   ✅ Completed using property decomposition');
+            log('');
+            
+            // Case 3: No array pattern + complex value → writeComplexValue
+            log('3️⃣ CASE: Regular Variable + Complex Object');
+            log('   Operation: machine.writeVariable("::demo:test", {command: 123, slider: 45.6})');
+            log('   Decision:  No array pattern + complex value → writeComplexValue()');
+            log('   Method:    Property decomposition approach');
+            log('   Steps:     Same as case 2, but for regular variable');
+            
+            const configObject = { command: 555, slider: 88.8, random: false };
+            await machine.writeVariable('::demo:test', configObject);
+            log('   ✅ Completed using property decomposition');
+            log('');
+            
+            // Case 4: No array pattern + primitive → writeSingleValue
+            log('4️⃣ CASE: Regular Variable + Primitive Value');
+            log('   Operation: machine.writeVariable("::demo:test.myvalue", 25.5)');
+            log('   Decision:  No array pattern + primitive value → writeSingleValue()');
+            log('   Method:    Direct write approach');
+            log('   Steps:     1. Write value directly to OPC UA node');
+            
+            await machine.writeVariable('::demo:test.myvalue', 25.5);
+            log('   ✅ Completed using direct write');
+            log('');
+            
+            // Case 5: Global variable examples
+            log('5️⃣ CASE: Global Variables');
+            log('   Operation: machine.writeVariable("gtest.struct1.member1", 999)');
+            log('   Decision:  No array pattern + primitive value → writeSingleValue()');
+            log('   Method:    Direct write approach');
+            
+            await machine.writeVariable('gtest.struct1.member1', 999);
+            log('   ✅ Global variable written directly');
+            
+            log('   Operation: machine.writeVariable("testarray.doubleArray[2,1]", {member1: 88, member2: "test"})');
+            log('   Decision:  Array pattern + complex value → writeComplexValue()');
+            log('   Method:    Property decomposition approach');
+            
+            await machine.writeVariable('testarray.doubleArray[2,1]', {
+                member1: 888,
+                member2: '2D Global',
+                member3: 'Multi-dimensional'
+            });
+            log('   ✅ Global 2D array element written using property decomposition');
+            log('');
+            
+            log('🎯 SUMMARY: Simplified Decision Logic');
+            log('=====================================');
+            log('The writeValue() method uses this simple decision tree:');
+            log('');
+            log('1. Is it an array element pattern (name[index]) AND primitive value?');
+            log('   YES → writeArrayElement() → read-modify-write');
+            log('   NO  → Continue to step 2');
+            log('');
+            log('2. Is the value complex (object/array with objects)?');
+            log('   YES → writeComplexValue() → property decomposition');
+            log('   NO  → writeSingleValue() → direct write');
+            log('');
+            log('✅ Benefits:');
+            log('   • Single decision point in writeValue()');
+            log('   • writeArrayElement() only handles primitives (simplified)');
+            log('   • Complex objects always use consistent decomposition');
+            log('   • No duplicate logic between array and non-array handling');
+            log('   • Easy to understand and maintain');
+            log('   • Works seamlessly with both task-local and global variables');
+            log('   • Supports multi-dimensional arrays with complex structures');
+            
+        } catch (error) {
+            log(`❌ Logic demo failed: ${error.message}`);
+            console.error('Detailed error:', error);
         }
     }
 };
@@ -341,9 +629,9 @@ function initializeDemo() {
             });
 
             // Array Types
-            log('📍 Arrays in task ::demo:test_array');
-            machine.initCyclicRead('::demo:test_array', (value) => {
-                log(`  └─2 ::demo:test_array = ${JSON.stringify(value)}`);
+            log('📍 Arrays in task ::demo:test_arrays');
+            machine.initCyclicRead('::demo:test_arrays', (value) => {
+                log(`  └─2 ::demo:test_arrays = ${JSON.stringify(value)}`);
             });
 
             // Global variables (no colons)

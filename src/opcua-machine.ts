@@ -51,6 +51,11 @@ export class OpcuaMachine {
     this.variableManager = new VariableManager(this.connection);
     this.subscriptionManager = new SubscriptionManager(this.connection, this.variableManager);
     
+    // Initialize VariableManager with current defaults
+    this.variableManager.setDefaultNamespace(this.defaultNamespace);
+    this.variableManager.setDefaultApplication(this.defaultApplication);
+    this.variableManager.setDefaultTask(this.defaultTask);
+    
     // Create default read group
     this.readGroups.set('default', {
       name: 'default',
@@ -277,29 +282,19 @@ export class OpcuaMachine {
 
   /**
    * Read a variable once (async with await)
+   * No registration required - automatically resolves NodeId
    */
-  public async readVariable(varName: string, options: VariableOptions = {}): Promise<any> {
-    // Check if variable is registered, if not register it temporarily
-    let variable = this.variableManager.getVariable(varName);
-    if (!variable) {
-      const nodeId = this.buildNodeId(varName, options);
-      variable = this.variableManager.registerVariable(varName, nodeId);
-    }
-    
+  public async readVariable(varName: string): Promise<any> {
+    // VariableManager already has current defaults - no need to set them again
     return await this.variableManager.readValue(varName);
   }
 
   /**
    * Write a variable once (async with await)
+   * No registration required - automatically resolves NodeId
    */
-  public async writeVariable(varName: string, value: any, options: VariableOptions = {}): Promise<void> {
-    // Check if variable is registered, if not register it temporarily
-    let variable = this.variableManager.getVariable(varName);
-    if (!variable) {
-      const nodeId = this.buildNodeId(varName, options);
-      variable = this.variableManager.registerVariable(varName, nodeId);
-    }
-    
+  public async writeVariable(varName: string, value: any): Promise<void> {
+    // VariableManager already has current defaults - no need to set them again
     await this.variableManager.writeValue(varName, value);
   }
 
@@ -308,6 +303,8 @@ export class OpcuaMachine {
    */
   public setDefaultNamespace(namespace: string): void {
     this.defaultNamespace = namespace.endsWith(';s=') ? namespace : namespace + ';s=';
+    // Automatically update VariableManager
+    this.variableManager.setDefaultNamespace(this.defaultNamespace);
   }
 
   /**
@@ -315,6 +312,8 @@ export class OpcuaMachine {
    */
   public setDefaultApplication(application: string): void {
     this.defaultApplication = application;
+    // Automatically update VariableManager
+    this.variableManager.setDefaultApplication(this.defaultApplication);
   }
 
   /**
@@ -322,6 +321,8 @@ export class OpcuaMachine {
    */
   public setDefaultTask(task: string): void {
     this.defaultTask = task;
+    // Automatically update VariableManager
+    this.variableManager.setDefaultTask(this.defaultTask);
   }
 
   /**

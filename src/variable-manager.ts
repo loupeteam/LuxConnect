@@ -18,9 +18,35 @@ export class VariableManager {
   private hierarchy = new VariableHierarchy();
   private changeHandlers = new Map<string, VariableChangeHandler[]>();
   private globalChangeHandlers: VariableChangeHandler[] = [];
+  
+  // NodeId generation settings
+  private defaultNamespace: string = 'ns=5;s=';
+  private defaultApplication: string = ''; // Empty means use parser default
+  private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
 
   constructor(connection: OpcuaConnection) {
     this.connection = connection;
+  }
+
+  /**
+   * Set default namespace for NodeId generation
+   */
+  public setDefaultNamespace(namespace: string): void {
+    this.defaultNamespace = namespace.endsWith(';s=') ? namespace : namespace + ';s=';
+  }
+
+  /**
+   * Set default application/module for variables without explicit application
+   */
+  public setDefaultApplication(application: string): void {
+    this.defaultApplication = application;
+  }
+
+  /**
+   * Set default task for variables without explicit task
+   */
+  public setDefaultTask(task: string): void {
+    this.defaultTask = task;
   }
 
   /**
@@ -139,15 +165,22 @@ export class VariableManager {
 
   /**
    * Read the current value of a variable by name
+   * No registration required - builds NodeId dynamically
    */
   public async readValue(name: string): Promise<any> {
     const normalizedName = this.normalizeVariableName(name);
+    
+    // Try to get nodeId from registered variable first
+    let targetNodeId: string;
     const varData = this.hierarchy.getVariable(normalizedName);
-    if (!varData) {
-      throw new Error(`Variable '${name}' is not registered`);
+    if (varData) {
+      targetNodeId = varData.mapping.nodeId;
+    } else {
+      // Generate NodeId dynamically - no registration required!
+      targetNodeId = this.buildNodeId(name);
     }
 
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(varData.mapping.nodeId)}/attributes/Value`, {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(targetNodeId)}/attributes/Value`, {
       method: 'GET'
     });
 
@@ -157,18 +190,20 @@ export class VariableManager {
       throw new Error(`Failed to read variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
     }
 
-    // Update hierarchy with new value
-    const newValue = result.value?.value;
+    const newValue = result.value;
     const timestamp = new Date(result.serverTimestamp || Date.now());
-    const quality = this.mapQualityCode(result.statusCode?.value || 0);
+    const quality = this.mapQualityCode(result.status?.code || 0);
 
-    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
-    
-    // Emit change events for all affected variables
-    for (const affectedName of affectedVariables) {
-      const affectedData = this.hierarchy.getVariable(affectedName);
-      if (affectedData) {
-        this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+    // If variable is registered, update hierarchy and emit change events
+    if (varData) {
+      const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
+      
+      // Emit change events for all affected variables
+      for (const affectedName of affectedVariables) {
+        const affectedData = this.hierarchy.getVariable(affectedName);
+        if (affectedData) {
+          this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+        }
       }
     }
 
@@ -177,18 +212,306 @@ export class VariableManager {
 
   /**
    * Write a value to a variable by name
+   * For complex objects, decomposes them into individual simple values and uses batch write
+   * For array elements with primitive values, uses read-modify-write approach
    */
   public async writeValue(name: string, value: any): Promise<void> {
     const normalizedName = this.normalizeVariableName(name);
-    const varData = this.hierarchy.getVariable(normalizedName);
-    if (!varData) {
-      throw new Error(`Variable '${name}' is not registered`);
+    
+    // Check if this is an array element access pattern (e.g., "myArray[0]", "obj.array[1]")
+    const arrayElementMatch = name.match(/^(.+)\[(\d+)\]$/);
+    if (arrayElementMatch && !this.isComplexValue(value)) {
+      // Only use array element logic for primitive values
+      // Complex values in arrays will be handled by normal complex object decomposition
+      const [, baseVariableName, indexStr] = arrayElementMatch;
+      const index = parseInt(indexStr, 10);
+      await this.writeArrayElement(baseVariableName, index, value);
+      return;
+    }
+    
+    // Check if value is a complex object that needs decomposition
+    // This will handle both regular complex objects AND complex values in array elements
+    if (this.isComplexValue(value)) {
+      await this.writeComplexValue(normalizedName, value, name);
+      return;
     }
 
-    // TODO: Add write queue to handle concurrent writes properly
-    // TODO: Add write confirmation callback or event
-    // TODO: Validate value type against variable's dataType if available
-    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(varData.mapping.nodeId)}/attributes/Value`, {
+    // Simple value write
+    await this.writeSingleValue(normalizedName, value, name);
+  }
+
+  /**
+   * Write a primitive value to a specific array element using read-modify-write approach
+   * This method only handles primitive values; complex values are handled by writeComplexValue
+   * No registration required - builds NodeId dynamically
+   */
+  private async writeArrayElement(baseVariableName: string, index: number, value: any): Promise<void> {
+    const normalizedBaseName = this.normalizeVariableName(baseVariableName);
+
+    try {
+      console.log(`🔧 Using read-modify-write for primitive array element: ${baseVariableName}[${index}]`);
+      
+      // Step 1: Read the entire array (readValue now handles unregistered variables)
+      const currentArray = await this.readValue(baseVariableName);
+      
+      if (!Array.isArray(currentArray)) {
+        throw new Error(`Variable '${baseVariableName}' is not an array (got ${typeof currentArray})`);
+      }
+
+      // Step 2: Check if index is valid
+      if (index < 0 || index >= currentArray.length) {
+        throw new Error(`Array index ${index} is out of bounds for array of length ${currentArray.length}`);
+      }
+
+      // Step 3: Update the specific element
+      const modifiedArray = [...currentArray];
+      modifiedArray[index] = value;
+
+      // Step 4: Write the entire modified array back (writeSingleValue now handles unregistered variables)
+      await this.writeSingleValue(normalizedBaseName, modifiedArray, baseVariableName);
+      
+      console.log(`✅ Updated array element: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to write array element '${baseVariableName}[${index}]': ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Check if a value is complex (object or array) and needs decomposition
+   * Arrays of primitives are now handled as simple values since array elements
+   * use read-modify-write approach
+   */
+  private isComplexValue(value: any): boolean {
+    // Arrays are handled as simple values now (read-modify-write for elements)
+    if (Array.isArray(value)) {
+      // Only treat arrays with objects as complex (for object property decomposition)
+      return value.some(item => typeof item === 'object' && item !== null);
+    }
+    
+    // Objects should be decomposed (unless they're null)
+    return value !== null && typeof value === 'object';
+  }
+
+  /**
+   * Write a complex value by decomposing it into simple values and batch writing
+   */
+  private async writeComplexValue(normalizedName: string, value: any, originalName: string): Promise<void> {
+    const flattenedValues = this.flattenValue('', value);
+    
+    if (flattenedValues.length === 0) {
+      throw new Error(`No writable values found in complex object for variable '${originalName}'`);
+    }
+
+    // Prepare batch write requests
+    const batchWrites: Array<{
+      nodeId: string;
+      value: any;
+      path: string;
+    }> = [];
+
+    for (const { path, value: simpleValue } of flattenedValues) {
+      const fullVariableName = normalizedName + path;
+      
+      // Check if the specific path variable is registered, if not register it
+      let varData = this.hierarchy.getVariable(fullVariableName);
+      if (!varData) {
+        // Try to register the sub-variable by building its nodeId
+        try {
+          const baseNodeId = this.hierarchy.getVariable(normalizedName)?.mapping.nodeId;
+          if (!baseNodeId) {
+            throw new Error(`Base variable '${originalName}' is not registered`);
+          }
+          
+          // Build nodeId for the sub-variable by appending the path
+          const subNodeId = baseNodeId.includes(';s=') 
+            ? baseNodeId + path
+            : baseNodeId + ';s=' + path;
+            
+          this.registerVariable(fullVariableName, subNodeId);
+          varData = this.hierarchy.getVariable(fullVariableName);
+          if (!varData) {
+            console.warn(`Could not retrieve registered sub-variable '${fullVariableName}'. Skipping.`);
+            continue;
+          }
+        } catch (error) {
+          console.warn(`Could not register sub-variable '${fullVariableName}': ${error}. Skipping.`);
+          continue;
+        }
+      }
+
+      // Ensure varData is not undefined
+      if (!varData) {
+        console.warn(`Could not find variable data for '${fullVariableName}'. Skipping.`);
+        continue;
+      }
+
+      batchWrites.push({
+        nodeId: varData.mapping.nodeId,
+        value: simpleValue,
+        path: path
+      });
+    }
+
+    // Execute batch write
+    await this.executeBatchWrite(batchWrites, originalName);
+  }
+
+  /**
+   * Flatten a complex value into simple path-value pairs
+   */
+  private flattenValue(basePath: string, value: any): Array<{ path: string; value: any }> {
+    const result: Array<{ path: string; value: any }> = [];
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        const path = `${basePath}[${index}]`;
+        if (typeof item === 'object' && item !== null) {
+          result.push(...this.flattenValue(path, item));
+        } else {
+          result.push({ path, value: item });
+        }
+      });
+    } else if (typeof value === 'object' && value !== null) {
+      Object.entries(value).forEach(([key, val]) => {
+        const path = basePath ? `${basePath}.${key}` : `.${key}`;
+        if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+          result.push(...this.flattenValue(path, val));
+        } else if (Array.isArray(val)) {
+          result.push(...this.flattenValue(path, val));
+        } else {
+          result.push({ path, value: val });
+        }
+      });
+    } else {
+      result.push({ path: basePath, value });
+    }
+
+    return result;
+  }
+
+  /**
+   * Execute batch write operations
+   */
+  private async executeBatchWrite(writes: Array<{ nodeId: string; value: any; path: string }>, originalName: string): Promise<void> {
+    const sessionId = this.connection.getSessionInfo()?.sessionId;
+    if (!sessionId) {
+      throw new Error('No active session');
+    }
+
+    // Build batch request payload following mapp Connect batch API format
+    const batchPayload = {
+      requests: writes.map((write, index) => ({
+        id: (index + 1).toString(),
+        method: 'PUT',
+        url: `/nodes/${encodeURIComponent(write.nodeId)}/attributes/Value`,
+        body: { value: write.value },
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }))
+    };
+
+    try {
+      const response = await this.connection.apiRequest(`/opcua/sessions/${sessionId}/nodes/$batch`, {
+        method: 'POST',
+        body: JSON.stringify(batchPayload)
+      });
+
+      const results = await response.json();
+      
+      // Check results and handle any failures
+      if (Array.isArray(results.responses)) {
+        const failures: string[] = [];
+        results.responses.forEach((result: any, index: number) => {
+          if (result.status >= 400 || (result.body && result.body.status?.code !== 0)) {
+            const errorMsg = result.body?.statusCode?.description || result.statusText || 'Unknown error';
+            failures.push(`${writes[index].path}: ${errorMsg}`);
+          }
+        });
+
+        if (failures.length > 0) {
+          throw new Error(`Failed to write some parts of complex variable '${originalName}':\n${failures.join('\n')}`);
+        }
+      }
+
+      // Update hierarchy for all successful writes
+      const timestamp = new Date();
+      const quality = 'Good';
+      
+      for (const write of writes) {
+        const fullVariableName = Object.keys(this.hierarchy.getAllVariables()).find(name => 
+          this.hierarchy.getVariable(name)?.mapping.nodeId === write.nodeId
+        );
+        
+        if (fullVariableName) {
+          const affectedVariables = this.hierarchy.updateVariable(fullVariableName, write.value, timestamp, quality);
+          
+          // Emit change events for all affected variables
+          for (const affectedName of affectedVariables) {
+            const affectedData = this.hierarchy.getVariable(affectedName);
+            if (affectedData) {
+              this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      // If batch write fails, fall back to individual writes
+      console.warn(`Batch write failed for '${originalName}', falling back to individual writes: ${error}`);
+      
+      const writePromises = writes.map(async write => {
+        try {
+          await this.writeSingleValueByNodeId(write.nodeId, write.value);
+        } catch (err) {
+          throw new Error(`Failed to write ${write.path}: ${err}`);
+        }
+      });
+
+      await Promise.all(writePromises);
+    }
+  }
+
+  /**
+   * Write a single simple value
+   * No registration required - builds NodeId dynamically
+   */
+  private async writeSingleValue(normalizedName: string, value: any, originalName: string): Promise<void> {
+    // Try to get nodeId from registered variable first
+    let targetNodeId: string;
+    const varData = this.hierarchy.getVariable(normalizedName);
+    if (varData) {
+      targetNodeId = varData.mapping.nodeId;
+    } else {
+      // Generate NodeId dynamically - no registration required!
+      targetNodeId = this.buildNodeId(originalName);
+    }
+
+    await this.writeSingleValueByNodeId(targetNodeId, value);
+
+    // If variable is registered, update hierarchy and emit change events
+    if (varData) {
+      const timestamp = new Date();
+      const quality = this.mapQualityCode(0); // Assume success
+      const affectedVariables = this.hierarchy.updateVariable(normalizedName, value, timestamp, quality);
+      
+      // Emit change events for all affected variables
+      for (const affectedName of affectedVariables) {
+        const affectedData = this.hierarchy.getVariable(affectedName);
+        if (affectedData) {
+          this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
+        }
+      }
+    }
+  }
+
+  /**
+   * Write a single value by nodeId
+   */
+  private async writeSingleValueByNodeId(nodeId: string, value: any): Promise<void> {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
       method: 'PUT',
       body: JSON.stringify({
         value: value
@@ -198,20 +521,7 @@ export class VariableManager {
     const result = await response.json();
     
     if (result.status?.code !== 0) {
-      throw new Error(`Failed to write variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
-    }
-
-    // Update hierarchy
-    const timestamp = new Date();
-    const quality = this.mapQualityCode(result.statusCode?.value || 0);
-    const affectedVariables = this.hierarchy.updateVariable(normalizedName, value, timestamp, quality);
-    
-    // Emit change events for all affected variables
-    for (const affectedName of affectedVariables) {
-      const affectedData = this.hierarchy.getVariable(affectedName);
-      if (affectedData) {
-        this.emitChangeEvent(affectedName, affectedData.value, affectedData.timestamp, affectedData.quality);
-      }
+      throw new Error(`Failed to write value: ${result.statusCode?.description || 'Unknown error'}`);
     }
   }
 
@@ -382,5 +692,41 @@ export class VariableManager {
       case 0x80000000: return 'bad';
       default: return 'unknown';
     }
+  }
+
+  /**
+   * Build NodeId from variable name
+   */
+  private buildNodeId(varName: string): string {
+    // If varName already has OPC UA namespace prefix, use as-is
+    if (varName.includes('ns=') || varName.includes('i=') || varName.includes('s=')) {
+      return varName;
+    }
+    
+    // Parse the variable name to ensure it's in proper module::task:variable format
+    let normalizedVarName: string;
+    try {
+      const parsedPath = VariablePathParser.parse(varName);
+      
+      // Apply defaults if missing application or task
+      if (!parsedPath.application && this.defaultApplication) {
+        parsedPath.application = this.defaultApplication;
+      }
+      
+      if (!parsedPath.task || parsedPath.task === 'AsGlobalPV') {
+        if (this.defaultTask && this.defaultTask !== 'AsGlobalPV') {
+          parsedPath.task = this.defaultTask;
+        }
+      }
+      
+      // Reconstruct the normalized variable name
+      normalizedVarName = VariablePathParser.reconstruct(parsedPath);
+    } catch (error) {
+      // If parsing fails, use the variable name as-is
+      normalizedVarName = varName;
+    }
+    
+    // Combine with namespace to create full NodeId
+    return this.defaultNamespace + normalizedVarName;
   }
 }
