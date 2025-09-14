@@ -241,15 +241,30 @@ export class VariableManager {
   }
 
   /**
-   * Write a primitive value to a specific array element using read-modify-write approach
+   * Write a primitive value to a specific array element
+   * First tries direct write to array element, falls back to read-modify-write if server doesn't support it
    * This method only handles primitive values; complex values are handled by writeComplexValue
    * No registration required - builds NodeId dynamically
    */
   private async writeArrayElement(baseVariableName: string, index: number, value: any): Promise<void> {
     const normalizedBaseName = this.normalizeVariableName(baseVariableName);
+    const arrayElementName = `${baseVariableName}[${index}]`;
 
     try {
-      console.log(`🔧 Using read-modify-write for primitive array element: ${baseVariableName}[${index}]`);
+      // First attempt: Try direct write to array element (if server supports it)
+      console.log(`🎯 Attempting direct write to array element: ${arrayElementName}`);
+      
+      try {
+        await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value, arrayElementName);
+        console.log(`✅ Direct write successful: ${arrayElementName} = ${JSON.stringify(value)}`);
+        return; // Success! No need for fallback
+      } catch (directWriteError) {
+        console.log(`⚠️ Direct write failed for ${arrayElementName}, falling back to read-modify-write`);
+        console.log(`   Direct write error: ${directWriteError instanceof Error ? directWriteError.message : String(directWriteError)}`);
+      }
+
+      // Fallback: Use read-modify-write approach
+      console.log(`🔧 Using read-modify-write fallback for primitive array element: ${baseVariableName}[${index}]`);
       
       // Step 1: Read the entire array (readValue now handles unregistered variables)
       const currentArray = await this.readValue(baseVariableName);
@@ -270,7 +285,7 @@ export class VariableManager {
       // Step 4: Write the entire modified array back (writeSingleValue now handles unregistered variables)
       await this.writeSingleValue(normalizedBaseName, modifiedArray, baseVariableName);
       
-      console.log(`✅ Updated array element: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
+      console.log(`✅ Read-modify-write successful: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -405,7 +420,7 @@ export class VariableManager {
       requests: writes.map((write, index) => ({
         id: (index + 1).toString(),
         method: 'PUT',
-        url: `/nodes/${encodeURIComponent(write.nodeId)}/attributes/Value`,
+        url: `/${encodeURIComponent(write.nodeId)}/attributes/Value`,
         body: { value: write.value },
         headers: {
           'Content-Type': 'application/json'
