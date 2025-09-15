@@ -18,7 +18,23 @@
     <Task Name="demoGlobal" />
     <Task Name="demo">
       <Variable Name="test" RecursiveEnable="2" />
-      <Variable Name="test_arrays" RecursiveEnable="2" />
+      <Variable Name="test_arrays" RecursiveEnable="2">
+        <Variable Name="New_Member1">
+          <Variable Name="reals" RecursiveEnable="2" />
+          <Variable Name="ints" RecursiveEnable="2" />
+        </Variable>
+        <Variable Name="TestOffsetArray">
+          <Variable Name="standard" RecursiveEnable="2" />
+          <Variable Name="offset" RecursiveEnable="2" />
+        </Variable>
+      </Variable>
+      <Variable Name="byte_ref" />
+      <Variable Name="cycle_counter" />
+      <Variable Name="dword_ref" />
+      <Variable Name="offset" />
+      <Variable Name="random_selector" />
+      <Variable Name="structure_size" />
+      <Variable Name="word_ref" />
     </Task>
   </Module>
 </OpcUaSource>

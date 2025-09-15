@@ -1,39 +1,42 @@
 
 TYPE
-	TestStruct : 	STRUCT 
-		command : BOOL;
-		slider : REAL;
-		random : REAL;
-		struct2 : TestStruct1;
-		struct3 : TestStruct1;
-		struct1 : TestStruct1;
-		myvalue : TestStruct3;
+	TestStruct : {REDUND_UNREPLICABLE} 	STRUCT 
+		command : {REDUND_UNREPLICABLE} BOOL;
+		slider : {REDUND_UNREPLICABLE} REAL;
+		random : {REDUND_UNREPLICABLE} REAL;
+		struct2 : {REDUND_UNREPLICABLE} TestStruct1;
+		struct3 : {REDUND_UNREPLICABLE} TestStruct1;
+		struct1 : {REDUND_UNREPLICABLE} TestStruct1;
+		myvalue : {REDUND_UNREPLICABLE} TestStruct3;
 	END_STRUCT;
-	TestStruct1 : 	STRUCT 
-		struct1 : TestStruct2;
-		struct2 : TestStruct2;
+	TestStruct1 : {REDUND_UNREPLICABLE} 	STRUCT 
+		struct1 : {REDUND_UNREPLICABLE} TestStruct2;
+		struct2 : {REDUND_UNREPLICABLE} TestStruct2;
 	END_STRUCT;
-	TestStruct2 : 	STRUCT 
-		member : BOOL;
-		member1 : INT;
-		member2 : DINT;
-		member3 : STRING[80];
+	TestStruct2 : {REDUND_UNREPLICABLE} 	STRUCT 
+		member : {REDUND_UNREPLICABLE} BOOL;
+		member1 : {REDUND_UNREPLICABLE} INT;
+		member2 : {REDUND_UNREPLICABLE} DINT;
+		member3 : {REDUND_UNREPLICABLE} STRING[80];
 	END_STRUCT;
-	TestStruct3 : 	STRUCT 
-		x : REAL;
+	TestStruct3 : {REDUND_UNREPLICABLE} 	STRUCT 
+		x : {REDUND_UNREPLICABLE} REAL;
 	END_STRUCT;
-	TestSimpleArray : 	STRUCT 
-		reals : ARRAY[0..2]OF REAL;
-		ints : ARRAY[0..2]OF INT;
+	TestSimpleArray : {REDUND_UNREPLICABLE} 	STRUCT 
+		reals : {REDUND_UNREPLICABLE} ARRAY[0..2]OF REAL;
+		ints : {REDUND_UNREPLICABLE} ARRAY[0..2]OF INT;
 	END_STRUCT;
-	TestOffsetArray : 	STRUCT 
-		standard : ARRAY[0..2]OF REAL;
-		offset : ARRAY[1..3]OF REAL;
+	TestOffsetArray : {REDUND_UNREPLICABLE} 	STRUCT 
+		standard : {REDUND_UNREPLICABLE} ARRAY[0..2]OF REAL;
+		offset : {REDUND_UNREPLICABLE} ARRAY[1..3]OF REAL;
 	END_STRUCT;
-	TestArrays : 	STRUCT 
+	TestArrays : {REDUND_UNREPLICABLE} 	STRUCT 
+		testArrayStruct : {REDUND_UNREPLICABLE} ARRAY[0..3]OF TestStruct2;
 		doubleArray : {REDUND_UNREPLICABLE} ARRAY[0..3,0..3]OF TestStruct2;
-		doubleArrayOffset : {REDUND_UNREPLICABLE} ARRAY[1..3,1..3]OF TestStruct2;
-		TestOffsetArray : TestOffsetArray;
-		New_Member1 : TestSimpleArray;
+		doubleArrayOffset1 : {REDUND_UNREPLICABLE} ARRAY[1..3,1..3]OF TestStruct2;
+		TestOffsetArray : {REDUND_UNREPLICABLE} TestOffsetArray;
+		New_Member1 : {REDUND_UNREPLICABLE} TestSimpleArray;
+		status : {REDUND_UNREPLICABLE} STRING[80];
+		temperature : {REDUND_UNREPLICABLE} REAL;
 	END_STRUCT;
 END_TYPE
