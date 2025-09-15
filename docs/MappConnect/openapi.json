@@ -1,0 +1,2278 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "mapp Connect Rest API",
+    "version": "6.1",
+    "description": "Rest Api for access to plc",
+    "x-logo": {
+      "url": "./logo.png",
+      "backgroundColor": "#FFFFFF",
+      "altText": ""
+    }
+  },
+  "servers": [
+    {
+      "url": "{protocol}://{host}:{port}/api/1.0",
+      "variables": {
+        "host": {
+          "default": "localhost",
+          "description": "host"
+        },
+        "port": {
+          "default": 8443,
+          "description": "port"
+        },
+        "protocol": {
+          "enum": [
+            "http",
+            "https"
+          ],
+          "default": "https"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "WebAPI",
+      "description": "Shared WebAPI functions"
+    },
+    {
+      "name": "global",
+      "description": "Global handler"
+    },
+    {
+      "name": "Session",
+      "description": "Everything about Session handling"
+    },
+    {
+      "name": "read/write",
+      "description": "Everything about read and write OpcUa Attributes"
+    },
+    {
+      "name": "Subscription",
+      "description": "Everything about subscription handling"
+    },
+    {
+      "name": "Methods",
+      "description": "Call OpcUa Methods"
+    },
+    {
+      "name": "Batch",
+      "description": "Combine multiple requests in one HTTP call"
+    },
+    {
+      "name": "Websocket",
+      "description": "Websockets for Pushmessages from the Server"
+    },
+    {
+      "name": "RBAC",
+      "description": "Removed, Roles can be fetched from OPC-UA directly"
+    },
+    {
+      "name": "Text",
+      "description": "Receive texts from Textsystem"
+    }
+  ],
+  "paths": {
+    "/pushchannel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/namespaceUri"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Websocket"
+        ],
+        "summary": "Websockets for Pushmessages",
+        "description": "Only available as Websocket, so you have to make an HTTP Upgrade request.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "StatusChangedEvent: New Status of OpcUa Session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "integer"
+                    },
+                    "statusId": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "DataChangedEvent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "integer"
+                    },
+                    "subscriptionId": {
+                      "type": "integer"
+                    },
+                    "DataNotifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "clientHandle": {
+                            "type": "integer"
+                          },
+                          "value": {
+                            "type": "object"
+                          },
+                          "status": {
+                            "type": "object"
+                          },
+                          "sourceTimestamp": {
+                            "type": "string"
+                          },
+                          "serverTimestamp": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth": {
+      "get": {
+        "tags": [
+          "WebAPI"
+        ],
+        "summary": "Authenticate session",
+        "operationId": "authenticateSession",
+        "description": "Authenticate web session.\n* If there is no web session with provided clientId, a new web session will be created.  \n* When called with HTTP Basic Auth, the session will be created with the provided credentials. If the credentials are invalid, the session will be created without an user.  \n* When called without HTTP Basic Auth, the session will be created without an user.\n",
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "basicAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully authenticated.  \nThe session ID is returned in a cookie named `ClientId`. This cookie needs to be included in subsequent requests.\nIf username is missing in the response, the session was created without an user because no credentials were provided.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string",
+                  "example": "ClientId={137c536d-563b-4e67-ada1-3b4c66afec54}; Path=/; HttpOnly"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized. The provided credentials are invalid or login has timed out.  \nThe session ID is returned in a cookie named 'ClientId'. You need to include this cookie in subsequent requests.  \nCheck the AR logger for further information.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string",
+                  "example": "ClientId={137c536d-563b-4e67-ada1-3b4c66afec54}; Path=/; HttpOnly"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error.  \nThe session could not be created. This should not happen.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "tags": [
+          "WebAPI"
+        ],
+        "summary": "Keep client session alive",
+        "description": "This request resets the timeout which destroys the client session (created with auth request) after 60s without any request. \nThe session will be destroyed if not used for 60s (no requests, no websocket connection).\n\nIf there is an active websocket connection, it is not neccessary to use this request. \nThe session will be kept alive as long as the websocket connection is active.\n\nNote that this session has nothing todo with the opcua session. Its the general client session which may contain multiple opcua sessions.\nThe opcua session has its own timeout which can be configured with the timeout parameter in the opcua session request.\n",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "NO_CONTENT"
+          }
+        }
+      }
+    },
+    "/opcua/localip": {
+      "get": {
+        "tags": [
+          "global"
+        ],
+        "summary": "Read IP address of server",
+        "description": "Reads the IPv4 address on which the server can reach himself. On ARemb this returns 127.0.0.1; On ARsim targets, this handler returns the IP address of the interface the ARsim is bound to.",
+        "responses": {
+          "200": {
+            "description": "Local IP Address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ip": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions": {
+      "post": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Create a new session",
+        "description": "Creates a new opcua session, establish a connection to OPC UA server.\n\nCalling this function successfully creates a secure channel to the server endpoint and it creates \nand activates an application session in the server application.\nIf the connection was lost the session will be reconnected.\nIf the server was restarted the session will be recreated.\n\nWithout any request, the session is automatically disconnect and deleted after a configurable timeout period.\nThis prevents any resource leaks on the server side where dead sessions are kept alive forever.\nThe timeout time can be configured in milliseconds with the timeout parameter.\nThe default value is 30 seconds and with zero the timeout is disabled.\nTo reset the timeout cyclically, use the HEAD request. An interval of timeout/2 is recommended. \n",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "session created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "507": {
+            "$ref": "#/components/responses/NotEnoughResources"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "userIdentityToken": {
+                    "$ref": "#/components/schemas/UserIdentityToken",
+                    "default": "inc.yaml#/UserIdentityTokenAnonymous"
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "default": 30000
+                  },
+                  "messageSecurityMode": {
+                    "$ref": "#/components/schemas/MessageSecurityMode",
+                    "default": "BestAvailable"
+                  },
+                  "securityPolicy": {
+                    "$ref": "#/components/schemas/SecurityPolicy",
+                    "default": "BestAvailable"
+                  },
+                  "sslConfiguration": {
+                    "$ref": "#/components/schemas/SslConfiguration"
+                  }
+                },
+                "example": {
+                  "url": "opc.tcp://127.0.0.1:4840",
+                  "userIdentityToken": {
+                    "username": "kirk",
+                    "password": "1234"
+                  },
+                  "timeout": 30000
+                }
+              }
+            }
+          },
+          "description": "The user to create.",
+          "required": true
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Fetch session information",
+        "description": "Fetch session info with specified id.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "session object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Delete a session",
+        "description": "Delete session with specified id.\n\nCalling this closes the session and the secure channel connection to the server.\nThe subscriptions assigned to the session are also deleted.\nAfter delete is called, no more events will be sent for this session object and related subscription objects. \nThe disconnect blocks until all outstanding service calls are finished and results are returned.\n",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "session successfully deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Reset session timeout",
+        "description": "Reset session timeout with specified id.\n\nWhen creating a new opcua session with /opcoa/sessions PATCH request, a timeout in milliseconds can be configured.\nWith this HEAD request as with all other /opcua/sessions/ requests the timer for the timeout is reseted.\nIf the timer expires the opcua session gets deleted. Sending this request in an interval of timeout/2 is recommended.\n",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "timeout reseted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Change user of session",
+        "description": "Change user for the session.\n\nChanging the user identity for a Session may cause \ndiscontinuities in active Subscriptions because \nthe Server may have to tear down connections to an underlying \nsystem and re-establish them using the new credentials.\nIn general subscriptions are retained. Events for changed permissions are sent for\nsubscribed items.\n",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userIdentityToken"
+                ],
+                "properties": {
+                  "userIdentityToken": {
+                    "$ref": "#/components/schemas/UserIdentityToken"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "session object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UaStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "Error when changing user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UaStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/attributes/{attributeName}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/nodeId"
+        },
+        {
+          "$ref": "#/components/parameters/attributeName"
+        }
+      ],
+      "get": {
+        "tags": [
+          "read/write"
+        ],
+        "summary": "Read node attribute",
+        "description": "Read node attribute",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "value of attribute",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "value": {
+                      "$ref": "#/components/schemas/AnyValue"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "read/write"
+        ],
+        "summary": "Change node attribute",
+        "description": "change value of opcua node attribute",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UaStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ],
+                    "example": 123
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/methods/{methodId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/nodeId"
+        },
+        {
+          "name": "methodId",
+          "in": "path",
+          "description": "Id of the method to call.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/NodeId"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Methods"
+        ],
+        "summary": "Call OPC-UA method",
+        "description": "Call Method with given arguments",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "args": {
+                      "$ref": "#/components/schemas/MethodArgument"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MethodArgument"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/references": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/nodeId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Read node reference",
+        "description": "Read opcua node references. Browse OPC UA server address space with one starting node. The Service is used by a client to navigate through the Address Space by passing a starting Node and direction.  The server returns the list of referenced nodes matching the criteria.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "browseDirection",
+            "in": "query",
+            "description": "An enumeration that specifies the direction of reverences to follow.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "forward",
+                "inverse",
+                "both"
+              ],
+              "default": "both"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "references": {
+                      "$ref": "#/components/schemas/References"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/translateBrowsePath": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/nodeId"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Translate browse paths to NodeId",
+        "description": "request the Server to translate a browse paths to a NodeId for the target node.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "description": "The RelativePath contains a sequence of BrowseNames",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "example": [
+                "6,\"Simulation\"",
+                "6,\"myTestInt\""
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "browsePathTargets": {
+                      "$ref": "#/components/schemas/BrowsePathTargets"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooManyMatches"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/namespaces/{namespaceUri}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/namespaceUri"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Get namespaceIndex for namespaceUri",
+        "description": "Get namespaceIndex for the namespaceUri",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "namespaceIndex",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "namespaceIndex"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Subscription"
+        ],
+        "summary": "Create subscription",
+        "description": "Create new subscription.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "status and id of created subscription",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "subscriptionId": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "507": {
+            "$ref": "#/components/responses/NotEnoughResources"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publishingInterval": {
+                    "type": "number",
+                    "description": "requested publishing interval in ms",
+                    "example": 100
+                  },
+                  "publishingEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "publishingInterval"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions/{subscriptionId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/subscriptionId"
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Subscription"
+        ],
+        "summary": "Delete subscription",
+        "description": "Delete subscription with specified id",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "subscription successfully deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Subscription"
+        ],
+        "deprecated": true,
+        "summary": "Change subscription",
+        "description": "Change subscription settings",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UaStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publishingInterval": {
+                    "type": "integer",
+                    "description": " requested publishing interval in ms",
+                    "example": 100
+                  },
+                  "publishingEnabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions/{subscriptionId}/monitoredItems": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/subscriptionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Subscription"
+        ],
+        "summary": "Create monitored item",
+        "description": "Create new monitored item",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "$ref": "#/components/schemas/UaStatus"
+                    },
+                    "monitoredItemId": {
+                      "type": "integer"
+                    },
+                    "revisedSamplingInterval": {
+                      "type": "integer",
+                      "description": "The actual sampling interval that the Server will use. <br> This value is based on a number of factors, including capabilities of the underlying system. The Server shall always return a <i>revisedSamplingInterval</i> that is equal or higher than the requested <i>samplingInterval</i>. If the requested <i>samplingInterval</i> is higher than the maximum sampling interval supported by the Server, the maximum sampling interval is returned."
+                    },
+                    "revisedQueueSize": {
+                      "type": "integer",
+                      "description": "The actual queue size that the Server will use."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "507": {
+            "$ref": "#/components/responses/NotEnoughResources"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "itemToMonitor": {
+                    "type": "object",
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/components/schemas/NodeId"
+                      },
+                      "attribute": {
+                        "$ref": "#/components/schemas/AttributeName"
+                      }
+                    }
+                  },
+                  "monitoringParameters": {
+                    "$ref": "#/components/schemas/MonitoringParameters"
+                  },
+                  "timestampsToReturn": {
+                    "type": "string",
+                    "enum": [
+                      "Source",
+                      "Server",
+                      "Both",
+                      "Neither"
+                    ],
+                    "default": "Neither"
+                  },
+                  "monitoringMode": {
+                    "$ref": "#/components/schemas/MonitoringMode"
+                  }
+                },
+                "required": [
+                  "itemToMonitor"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions/{subscriptionId}/monitoredItems/{monitoredItemId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        },
+        {
+          "$ref": "#/components/parameters/subscriptionId"
+        },
+        {
+          "$ref": "#/components/parameters/monitoredItemId"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Subscription"
+        ],
+        "summary": "Modify monitored item.",
+        "description": "Modify settings of monitored item. See request body section for possible settings.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UaStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "monitoringMode": {
+                    "$ref": "#/components/schemas/MonitoringMode"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Subscription"
+        ],
+        "summary": "Delete monitored item",
+        "description": "Delete monitored item with specified id",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "monitored item successfully deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/attributes/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/nodes/{nodeId}/methods/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/namespaces/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/opcua/sessions/{sessionId}/subscriptions/{subscriptionId}/monitoredItems/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    },
+    "/text/languages": {
+      "get": {
+        "tags": [
+          "Text"
+        ],
+        "summary": "Get IDs of available languages",
+        "description": "Get IDs of available languages.",
+        "responses": {
+          "200": {
+            "description": "Language IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "languageIds": {
+                      "$ref": "#/components/schemas/LanguageIds"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/text/languages/default": {
+      "get": {
+        "tags": [
+          "Text"
+        ],
+        "summary": "Get ID of default language",
+        "description": "Get ID of the default (System) language.",
+        "responses": {
+          "200": {
+            "description": "Default Language ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "defaultLanguageId": {
+                      "$ref": "#/components/schemas/LanguageId"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/text/{languageId}/{namespace}": {
+      "get": {
+        "tags": [
+          "Text"
+        ],
+        "summary": "Get all texts in language",
+        "description": "Get all texts of specified language ID and namespace.\n### Authentication:\nAuthentication is required for all namespaces except `BR` and its sub-namespaces. Authentication is done by calling the `/auth` endpoint.\n",
+        "responses": {
+          "200": {
+            "description": "Array of text objects (text key + text value). If a text is not available in the requested language, the text of the fallback language is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextItems"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/text/{languageId}/{namespace}/{textkey}": {
+      "get": {
+        "tags": [
+          "Text"
+        ],
+        "summary": "Get text for textkey",
+        "description": "Get a text of a textkey of a specified language ID and namespace.  \n### Authentication:\nAuthentication is required for all namespaces except `BR` and its sub-namespaces. Authentication is done by calling the `/auth` endpoint.\n",
+        "responses": {
+          "200": {
+            "description": "One single text object (text key + text value) of the requested language. If text is not available in the requested language, the text of the fallback language is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextItem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/text/{languageId}/{namespace}/$batch": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/sessionId"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Batch"
+        ],
+        "description": "Combine multiple requests with same starting path segments by using [JSON batching](https://docs.microsoft.com/en-us/graph/json-batching).<br/> The main goal is to reduce number of requests to the webserver and opc ua server.  As performance optimization requests may be combined into one service call to opcua server if possible  (i.e multiple GET value requests always handled as one). The order in which the requests are handled is not defined! <br/> <br/> The example shows how a GET and PUT method can be combined for two different node. <br/> <br/> If the request contains a \"body\" the \"Content-Type\" has to be definded in \"headers\" object of the request (see example below) ",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MissingParameter"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "ClientId"
+      },
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    },
+    "schemas": {
+      "SessionId": {
+        "type": "integer",
+        "example": 1
+      },
+      "NamespaceUri": {
+        "type": "string",
+        "example": "http://PLCopen.org/OpcUa/IEC61131-3/"
+      },
+      "AuthenticationResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "success",
+          "roles"
+        ],
+        "example": {
+          "success": true,
+          "username": "kirk",
+          "roles": [
+            "admin",
+            "user"
+          ]
+        }
+      },
+      "UserIdentityTokenAnonymous": {
+        "type": "object"
+      },
+      "UserIdentityTokenUserPassword": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "username"
+        ],
+        "example": {
+          "username": "kirk",
+          "password": "1234"
+        }
+      },
+      "UserIdentityToken": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserIdentityTokenAnonymous"
+          },
+          {
+            "$ref": "#/components/schemas/UserIdentityTokenUserPassword"
+          }
+        ],
+        "example": {
+          "username": "kirk",
+          "password": "1234"
+        }
+      },
+      "MessageSecurityMode": {
+        "type": "string",
+        "enum": [
+          "None",
+          "Sign",
+          "SignAndEncrypted",
+          "BestAvailable"
+        ],
+        "description": "Selection of the OPC UA security mode.<br><br> Defines the security policies with which messages are transferred between the OPC UA server and client. If best available is selected as the message security policy, the OPC UA server is queried as to which is available and the best policy is applied.",
+        "default": "BestAvailable"
+      },
+      "SecurityPolicy": {
+        "type": "string",
+        "enum": [
+          "None",
+          "Basic256Sha256",
+          "Aes128_Sha256_RsaOaep",
+          "Aes256_Sha256_RsaPss",
+          "BestAvailable"
+        ],
+        "description": "Selection of the cryptographic algorithm.<br><br> Selects the encryption algorithm (security policy) with which the signature and messages should be encrypted during communication between the OPC UA server and client. If best available is selected as the security policy, the OPC UA server is queried as to which is available and the best policy is applied.",
+        "default": "BestAvailable"
+      },
+      "SslConfiguration": {
+        "type": "string",
+        "description": "Select SSL configuration.<br><br> Selects the SSL configuration in which the certificate and key to be used are entered.<br> If no SSL configuration is specified, a default certificate and default key are created and used."
+      },
+      "UaStatus": {
+        "description": "Statuscode as descriped in the OPC-UA standard. Currently it can also returns the Status \"GoodPasswordChangeRequired\" with value 0x00EF0000. This Status will be Part of the standard in the future.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "string": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "string"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UaStatus"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "example": {
+          "id": 1,
+          "url": "opc.tcp://127.0.0.1:4840",
+          "status": {
+            "code": 0,
+            "string": "Good"
+          }
+        }
+      },
+      "ApiStatus": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectionStatus": {
+        "type": "string",
+        "enum": [
+          "connected",
+          "disconnected"
+        ]
+      },
+      "SessionStatus": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConnectionStatus"
+          }
+        }
+      },
+      "Status": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ApiStatus"
+          },
+          {
+            "$ref": "#/components/schemas/UaStatus"
+          }
+        ],
+        "type": "object"
+      },
+      "NodeId": {
+        "type": "string",
+        "example": "ns=6;s=::myProg:Var1"
+      },
+      "AttributeName": {
+        "type": "string",
+        "enum": [
+          "NodeId",
+          "NodeClass",
+          "BrowseName",
+          "DisplayName",
+          "Description",
+          "WriteMask",
+          "UserWriteMask",
+          "IsAbstract",
+          "Symmetric",
+          "InverseName",
+          "ContainsNoLoops",
+          "EventNotifier",
+          "Value",
+          "DataType",
+          "ValueRank",
+          "ArrayDimensions",
+          "AccessLevel",
+          "UserAccessLevel",
+          "MinimumSamplingInterval",
+          "Historizing",
+          "Executable",
+          "UserExecutable"
+        ],
+        "example": "Value"
+      },
+      "AnyValue": {
+        "description": "Can be any value - string, number, boolean, array or object.",
+        "example": 42
+      },
+      "MethodArgument": {
+        "type": "object",
+        "properties": {
+          "argName1": {
+            "$ref": "#/components/schemas/AnyValue"
+          },
+          "argNameN": {
+            "$ref": "#/components/schemas/AnyValue"
+          }
+        },
+        "example": {
+          "myArg1": 1,
+          "myArg2": "test"
+        }
+      },
+      "QualifiedName": {
+        "type": "object",
+        "properties": {
+          "namespaceIndex": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "DisplayName": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "example": {
+          "locale": "en",
+          "text": "my node description"
+        }
+      },
+      "NodeClass": {
+        "type": "string",
+        "enum": [
+          "Object",
+          "Variable",
+          "Method",
+          "ObjectType",
+          "VariableType",
+          "ReferenceType",
+          "DataType",
+          "View"
+        ]
+      },
+      "Reference": {
+        "type": "object",
+        "properties": {
+          "referenceTypeId": {
+            "$ref": "#/components/schemas/NodeId"
+          },
+          "isForward": {
+            "type": "boolean"
+          },
+          "nodeId": {
+            "$ref": "#/components/schemas/NodeId"
+          },
+          "browseName": {
+            "$ref": "#/components/schemas/QualifiedName"
+          },
+          "displayName": {
+            "$ref": "#/components/schemas/DisplayName"
+          },
+          "nodeClass": {
+            "$ref": "#/components/schemas/NodeClass"
+          },
+          "typeDefinition": {
+            "$ref": "#/components/schemas/NodeId"
+          }
+        }
+      },
+      "References": {
+        "description": "References of Node",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Reference"
+        }
+      },
+      "ExpandedNodeId": {
+        "type": "object",
+        "description": "An expanded node id is a node id where the namespace index can be given as index or as a string URI",
+        "properties": {
+          "nodeId": {
+            "$ref": "#/components/schemas/NodeId",
+            "description": "If namespaceUri is specified, the namespace index is invalid."
+          },
+          "namespaceUri": {
+            "$ref": "#/components/schemas/NamespaceUri",
+            "description": "If this value is specified, the namespace index in nodeId is 0 and must be ignored."
+          },
+          "serverIndex": {
+            "type": "integer",
+            "description": "Index that identifies the Server that contains the TargetNode.  This Server may be the local Server or a remote Server. This index is the index of that Server in the local Server’s Server table.  The index of the local Server in the Server table is always 0.  All remote Servers have indexes greater than 0."
+          }
+        }
+      },
+      "BrowsePathTarget": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "$ref": "#/components/schemas/ExpandedNodeId",
+            "example": {
+              "nodeId": "s=::myProg:Var1",
+              "namespaceUri": "urn:B&R/pv/",
+              "serverIndex": 0
+            }
+          }
+        }
+      },
+      "BrowsePathTargets": {
+        "description": "All result target nodes for the browse path.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BrowsePathTarget"
+        }
+      },
+      "MonitoringParameters": {
+        "type": "object",
+        "properties": {
+          "clientHandle": {
+            "type": "integer",
+            "default": 0,
+            "description": "Client-supplied id of the MonitoredItem. This id is used in Notifications generated for the list Node."
+          },
+          "samplingInterval": {
+            "type": "number",
+            "default": 0,
+            "description": "The interval that defines the fastest rate at which the MonitoredItem(s) should be accessed and evaluated. This interval is defined in milliseconds. The value 0 indicates that the Server should use the fastest practical rate. The value -1 indicates that the default sampling interval defined by the publishing interval of the Subscription is requested. A different sampling interval is used if the publishing interval is not a supported sampling interval. Any negative number is interpreted as -1. The sampling interval is not changed if the publishing interval is changed by a subsequent call to the ModifySubscription Service. The Server uses this parameter to assign the MonitoredItems to a sampling interval that it supports. The assigned interval is provided in the revisedSamplingInterval parameter. The Server shall always return a          revisedSamplingInterval that is equal or higher than the requested samplingInterval. If the requested          samplingInterval is higher than the maximum sampling interval supported by the Server, the maximum sampling            interval is returned."
+          },
+          "queueSize": {
+            "type": "integer",
+            "default": 1,
+            "description": "The requested size of the MonitoredItem queue.<br>\nThe following values have special meaning for data monitored items:<br>\n\n  | Value | Meaning |\n  | ------- | -------- |\n  | 0 or 1  | the Server returns the default queue size which shall be 1 as <i>revisedQueueSize</i> for data monitored items. The queue has a single entry, effectively disabling queuing. |\n\nFor values larger than one a first-in-first-out queue is to be used. The Server may limit the size in <i>revisedQueueSize</i>. In the case of a queue overflow, the Overflow bit (flag) in the InfoBits portion of the DataValue statusCode is set in the new value.\n<br><br>\nThe following values have special meaning for event monitored items:<br>\n  | Value | Meaning |\n  | ------- | -------- |\n  | 0 | the Server returns the default queue size for Event Notifications as <i>revisedQueueSize</i> for event monitored items. |\n  | 1 | the Server returns the minimum queue size the Server requires for Event Notifications as <i>revisedQueueSize</i>. |\n  | MaxUInt32 | the Server returns the maximum queue size that the Server can support for Event Notifications as <i>revisedQueueSize</i>. |\nIf a Client chooses a value between the minimum and maximum settings of the Server the value shall be returned in the <i>revisedQueueSize</i>. If the requested queueSize is outside the minimum or maximum, the Server shall return the corresponding bounding value.\nIn the case of a queue overflow, an Event of the type EventQueueOverflowEventType is generated. \n"
+          }
+        }
+      },
+      "MonitoringMode": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "sampling",
+          "reporting"
+        ],
+        "default": "reporting",
+        "description": "The monitoringMode is an enumeration that specifies whether sampling and reporting are enabled or disabled for a MonitoredItem. This paramter is helpful to reduce performance overhead for not used monitored items but still keep them for next use. When a MonitoredItem is enabled (i.e. when the monitoringMode is changed from 'disabled' to 'sampling' or 'reporting'),  the Server shall report the first sample as soon as possible and the time of this sample becomes the starting point for the next sampling interval. Setting the mode to 'disabled' causes all queued notifications to be deleted. <br><br> <b>disabled</b> - The item being monitored is not sampled or evaluated, and Notifications are not generated or queued. Notification reporting is disabled.<br> <b>sampling</b> - The item being monitored is sampled and evaluated, and Notifications are generated and queued. Notification reporting is disabled.<br> <b>reporting</b> - (default) The item being monitored is sampled and evaluated, and Notifications are generated and queued. Notification reporting is enabled.<br>"
+      },
+      "BatchRequest": {
+        "type": "object",
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "object"
+                },
+                "headers": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "method",
+                "url"
+              ]
+            },
+            "example": [
+              {
+                "id": "1",
+                "method": "GET",
+                "url": "/readNodeId/attributes/Value"
+              },
+              {
+                "id": "2",
+                "method": "PUT",
+                "url": "/writeNodeId/attributes/Value",
+                "body": {
+                  "value": 42
+                },
+                "headers": {
+                  "Content-Type": "application/json"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "BatchResponse": {
+        "type": "object",
+        "properties": {
+          "responses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "integer"
+                },
+                "body": {
+                  "type": "object"
+                },
+                "headers": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "id",
+                "status"
+              ]
+            },
+            "example": [
+              {
+                "id": "1",
+                "status": 200,
+                "body": {
+                  "status": {
+                    "code": 0,
+                    "string": "Good"
+                  },
+                  "value": 42
+                }
+              },
+              {
+                "id": "2",
+                "status": 200,
+                "body": {
+                  "status": {
+                    "code": 0,
+                    "string": "Good"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "LanguageId": {
+        "type": "string",
+        "example": "en"
+      },
+      "LanguageIds": {
+        "description": "List of language IDs",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/LanguageId"
+        }
+      },
+      "TextItems": {
+        "type": "object",
+        "properties": {
+          "myTextKey": {
+            "type": "string",
+            "example": "Some language specific text"
+          },
+          "myOtherText": {
+            "type": "string",
+            "example": "Some other text"
+          }
+        }
+      },
+      "TextItem": {
+        "type": "object",
+        "properties": {
+          "myTextKey": {
+            "type": "string",
+            "example": "Some language specific text"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "sessionId": {
+        "name": "sessionId",
+        "in": "path",
+        "description": "Id of the session.",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SessionId"
+        }
+      },
+      "namespaceUri": {
+        "name": "namespaceUri",
+        "in": "path",
+        "description": "QualifiedName of the namespace",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/NamespaceUri"
+        }
+      },
+      "nodeId": {
+        "name": "nodeId",
+        "in": "path",
+        "description": "Id of the node. The node id is splitted into namespace index (ns) and identifier type plus identifier. Valid identifier types are integer (i) and string (s). Sample: ns=10;i=1234",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/NodeId"
+        }
+      },
+      "attributeName": {
+        "name": "attributeName",
+        "in": "path",
+        "description": "Name of attribute to be read",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AttributeName"
+        }
+      },
+      "subscriptionId": {
+        "name": "subscriptionId",
+        "in": "path",
+        "description": "Id of subscription",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "monitoredItemId": {
+        "name": "monitoredItemId",
+        "in": "path",
+        "description": "Id of monitored item",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "MissingParameter": {
+        "description": "Missing or invalid required parameter",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiStatus"
+            }
+          }
+        }
+      },
+      "NotEnoughResources": {
+        "description": "Not enough resources",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UaStatus"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The specified resource was not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Status"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "No permission to access resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UaStatus"
+            }
+          }
+        }
+      },
+      "TooManyMatches": {
+        "description": "The requested operation has too many matches to return",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/UaStatus"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Service is not available on your system",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Status"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Status"
+            }
+          }
+        }
+      }
+    }
+  }
+}
