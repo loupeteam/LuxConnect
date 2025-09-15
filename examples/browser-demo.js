@@ -188,8 +188,12 @@ window.addVariable = function() {
 window.readVariable = async function() {
     if (machine) {
         try {
-            const value = await machine.readVariable('::demo:test_arrays.testArrayStruct[0]');
-            log(`📖 Read ::demo:test_arrays.testArrayStruct[0]: ${JSON.stringify(value)}`);
+            // const value = await machine.readVariable('::demo:test_arrays.testArrayStruct[0]');
+            // log(`📖 Read ::demo:test_arrays.testArrayStruct[0]: ${JSON.stringify(value)}`);
+            const value1 = await machine.readVariable('::demo:test_arrays.New_Member1.ints[0]');
+            const value0 = await machine.writeVariable('::demo:test_arrays.New_Member1.ints[0]', value1 + 10);
+            const value2 = await machine.readVariable('::demo:test_arrays.New_Member1.ints[0]');
+            log(`📖 Read ::demo:test_arrays.New_Member1.ints[0]: ${JSON.stringify(value2)}`);
         } catch (error) {
             log(`❌ Read failed: ${error.message}`);
         }
@@ -208,19 +212,7 @@ window.writeVariable = async function() {
                 command: 42,
                 slider: 75.5,
                 random: true,
-                struct1: {
-                    member1: 100,
-                    member2: 'Hello World'
-                },
-                struct2: {
-                    member1: 200,
-                    member2: 'Complex Test'
-                },
-                struct3: {
-                    member1: 300,
-                    member2: 'Third Struct'
-                },
-                myvalue: 999.99
+                myvalue: { x: 100 }
             };
             
             log('Complex TestStruct object to write:');
@@ -247,7 +239,7 @@ window.writeVariable = async function() {
             log('📊 Simple Value Writing Demo');
             log('============================');
             log('Writing simple value to global gtest.myvalue = 25.5...');
-            await machine.writeVariable('gtest.myvalue', 25.5);
+            await machine.writeVariable('gtest.myvalue.x', 25.5);
             log('✅ Global variable written successfully');
             log('');
             
@@ -255,18 +247,14 @@ window.writeVariable = async function() {
             log('🔢 Primitive Types Demo');
             log('======================');
             
-            log('Writing boolean: ::demo:test.random = true');
-            await machine.writeVariable('::demo:test.random', true);
+            log('Writing boolean: ::demo:test.command = true');
+            await machine.writeVariable('::demo:test.command', true);
             log('✅ Boolean written');
             
-            log('Writing string: ::demo:test.struct1.member2 = "Demo System"');
-            await machine.writeVariable('::demo:test.struct1.member2', 'Demo System');
+            log('Writing string: ::demo:test.struct1.struct1.member3 = "Demo System"');
+            await machine.writeVariable('::demo:test.struct1.struct1.member3', 'Demo System');
             log('✅ String written');
-            
-            log('Writing integer: ::demo:test.command = 42');
-            await machine.writeVariable('::demo:test.command', 42);
-            log('✅ Integer written');
-            
+                        
             log('Writing float: ::demo:test.slider = 88.8');
             await machine.writeVariable('::demo:test.slider', 88.8);
             log('✅ Float written');
@@ -302,7 +290,7 @@ window.writeArrayVariable = async function() {
             
             const complexObject = {
                 member1: 999,
-                member2: 'Complex Array Element'
+                member2: 100,
             };
             
             log('   Complex object to write:');
@@ -321,7 +309,7 @@ window.writeArrayVariable = async function() {
             log('   Writing ::demo:test_arrays.doubleArray[0,0] = {member1: 100, member2: "Complex [0,0]"}');
             await machine.writeVariable('::demo:test_arrays.doubleArray[0,0]', {
                 member1: 100,
-                member2: 'Complex [0,0]',
+                member2: 0,
                 member3: 'First element'
             });
             log('   ✅ Complex structure written to 2D array element (property decomposition)');
@@ -329,37 +317,26 @@ window.writeArrayVariable = async function() {
             log('   Writing ::demo:test_arrays.doubleArray[1,2] = {member1: 120, member2: "Complex [1,2]"}');
             await machine.writeVariable('::demo:test_arrays.doubleArray[1,2]', {
                 member1: 120,
-                member2: 'Complex [1,2]',
+                member2: 0,
                 member3: 'Second element'
             });
             log('   ✅ Another complex structure written to 2D array element');
             
             // Demo 4: Mixed operations with 2D complex array
             log('4️⃣ Mixed operations demo:');
-            
-            // Write entire 2D array structure
-            log('   Writing 2D array structure: ::demo:test_arrays.doubleArray[0] (entire row)');
-            const arrayRow = [
-                {member1: 10, member2: 'Row0 Col0', member3: 'R0C0'},
-                {member1: 11, member2: 'Row0 Col1', member3: 'R0C1'},
-                {member1: 12, member2: 'Row0 Col2', member3: 'R0C2'},
-                {member1: 13, member2: 'Row0 Col3', member3: 'R0C3'}
-            ];
-            await machine.writeVariable('::demo:test_arrays.doubleArray[0]', arrayRow);
-            log('   ✅ Entire 2D array row written (complex structure decomposition)');
-            
+                        
             // Then modify individual elements within the row
             log('   Modifying individual elements within the row:');
             await machine.writeVariable('::demo:test_arrays.doubleArray[0,0]', {
                 member1: 999,
-                member2: 'Modified Element',
+                member2: 101,
                 member3: 'Updated'
             });
             log('   ✅ doubleArray[0,0] = {member1: 999, ...}');
             
             await machine.writeVariable('::demo:test_arrays.doubleArray[0,3]', {
                 member1: 777,
-                member2: 'Last Element',
+                member2: -1,
                 member3: 'Final'
             });
             log('   ✅ doubleArray[0,3] = {member1: 777, ...}');
@@ -370,22 +347,23 @@ window.writeArrayVariable = async function() {
             log('   Writing to global testarray.doubleArray[2,1] = {member1: 777, member2: "Global 2D"}');
             await machine.writeVariable('testarray.doubleArray[2,1]', {
                 member1: 777,
-                member2: 'Global 2D Element',
+                member2: 984,
                 member3: 'Global structure'
             });
             log('   ✅ Global 2D array element written');
             
             log('   Writing to global testarray.testArrayStruct[1].member2 = "Global Test"');
-            await machine.writeVariable('testarray.testArrayStruct[1].member2', 'Global Test');
+            await machine.writeVariable('testarray.testArrayStruct[1].member2', 200);
             log('   ✅ Global struct array member written');
             
             log('🎉 Array element writing demo completed!');
             log('');
             log('📋 Summary of approaches used:');
-            log('   • Primitive values → Read-modify-write (efficient for simple updates)');
+            log('   • Direct array element write → Tries direct write first (if server supports)');
+            log('   • Read-modify-write fallback → Used when direct write fails');
             log('   • Complex objects → Property decomposition (consistent with OPC UA)');
             log('   • 2D arrays → Multi-dimensional indexing with complex structures');
-            log('   • Library automatically chooses the right approach based on value type');
+            log('   • Library automatically chooses the best approach and falls back gracefully');
             log('   • Works with both task-local (::demo:) and global variables');
             
         } catch (error) {
@@ -404,15 +382,16 @@ window.runLogicDemo = async function() {
             log('based on BOTH the variable name pattern AND the value type.');
             log('');
             
-            // Case 1: Array element + primitive value → writeArrayElement (read-modify-write)
+            // Case 1: Array element + primitive value → Try direct write, fallback to read-modify-write
             log('1️⃣ CASE: Array Element + Primitive Value');
             log('   Operation: machine.writeVariable("::demo:test_arrays.testArrayStruct[0].member1", 123)');
-            log('   Decision:  Array pattern detected + primitive value → writeSingleValue()');
-            log('   Method:    Direct write approach (single property)');
-            log('   Steps:     1. Write value directly to specific property');
+            log('   Decision:  Array pattern detected + primitive value → Try direct write first');
+            log('   Method:    Direct write with read-modify-write fallback');
+            log('   Steps:     1. Try writing directly to array element');
+            log('              2. If that fails, fall back to read-modify-write approach');
             
             await machine.writeVariable('::demo:test_arrays.testArrayStruct[0].member1', 123);
-            log('   ✅ Completed using direct write');
+            log('   ✅ Completed (check console for which method was used)');
             log('');
             
             // Case 2: Array element + complex value → writeComplexValue (property decomposition)
@@ -425,7 +404,7 @@ window.runLogicDemo = async function() {
             log('                 - ::demo:test_arrays.doubleArray[0,1].member1 = 1');
             log('                 - ::demo:test_arrays.doubleArray[0,1].member2 = "test"');
             
-            const complexObject = { member1: 777, member2: 'logic demo', member3: 'complex 2D' };
+            const complexObject = { member1: 777, member2: 20, member3: 'complex 2D' };
             await machine.writeVariable('::demo:test_arrays.doubleArray[0,1]', complexObject);
             log('   ✅ Completed using property decomposition');
             log('');
@@ -449,7 +428,7 @@ window.runLogicDemo = async function() {
             log('   Method:    Direct write approach');
             log('   Steps:     1. Write value directly to OPC UA node');
             
-            await machine.writeVariable('::demo:test.myvalue', 25.5);
+            await machine.writeVariable('::demo:test.myvalue.x', 25.5);
             log('   ✅ Completed using direct write');
             log('');
             
@@ -459,7 +438,7 @@ window.runLogicDemo = async function() {
             log('   Decision:  No array pattern + primitive value → writeSingleValue()');
             log('   Method:    Direct write approach');
             
-            await machine.writeVariable('gtest.struct1.member1', 999);
+            await machine.writeVariable('gtest.struct1.struct1.member1', 999);
             log('   ✅ Global variable written directly');
             
             log('   Operation: machine.writeVariable("testarray.doubleArray[2,1]", {member1: 88, member2: "test"})');
@@ -468,7 +447,7 @@ window.runLogicDemo = async function() {
             
             await machine.writeVariable('testarray.doubleArray[2,1]', {
                 member1: 888,
-                member2: '2D Global',
+                member2: 99,
                 member3: 'Multi-dimensional'
             });
             log('   ✅ Global 2D array element written using property decomposition');
@@ -487,13 +466,14 @@ window.runLogicDemo = async function() {
             log('   NO  → writeSingleValue() → direct write');
             log('');
             log('✅ Benefits:');
-            log('   • Single decision point in writeValue()');
-            log('   • writeArrayElement() only handles primitives (simplified)');
+            log('   • Intelligent fallback strategy for array element writes');
+            log('   • Always tries the most efficient method first (direct write)');
+            log('   • Gracefully falls back to read-modify-write when needed');
             log('   • Complex objects always use consistent decomposition');
-            log('   • No duplicate logic between array and non-array handling');
-            log('   • Easy to understand and maintain');
-            log('   • Works seamlessly with both task-local and global variables');
+            log('   • Single decision point in writeValue() with automatic method selection');
+            log('   • Works seamlessly with different server configurations');
             log('   • Supports multi-dimensional arrays with complex structures');
+            log('   • Comprehensive error handling and logging for troubleshooting');
             
         } catch (error) {
             log(`❌ Logic demo failed: ${error.message}`);

@@ -232,7 +232,7 @@ export class VariableManager {
     // Check if value is a complex object that needs decomposition
     // This will handle both regular complex objects AND complex values in array elements
     if (this.isComplexValue(value)) {
-      await this.writeComplexValue(normalizedName, value, name);
+      await this.writeComplexValue(value, name);
       return;
     }
 
@@ -244,6 +244,7 @@ export class VariableManager {
    * Write a primitive value to a specific array element
    * First tries direct write to array element, falls back to read-modify-write if server doesn't support it
    * This method only handles primitive values; complex values are handled by writeComplexValue
+   * No registration required - builds NodeId dynamically
    * No registration required - builds NodeId dynamically
    */
   private async writeArrayElement(baseVariableName: string, index: number, value: any): Promise<void> {
@@ -310,9 +311,11 @@ export class VariableManager {
   }
 
   /**
-   * Write a complex value by decomposing it into simple values and batch writing
+   * Write a complex value by decomposing it into individual simple values
+   * Uses Microsoft Graph JSON batching for efficient multi-variable writes
+   * No registration required - builds NodeIds dynamically
    */
-  private async writeComplexValue(normalizedName: string, value: any, originalName: string): Promise<void> {
+  private async writeComplexValue(value: any, originalName: string): Promise<void> {
     const flattenedValues = this.flattenValue('', value);
     
     if (flattenedValues.length === 0) {
@@ -327,46 +330,21 @@ export class VariableManager {
     }> = [];
 
     for (const { path, value: simpleValue } of flattenedValues) {
-      const fullVariableName = normalizedName + path;
+      const fullVariableName = originalName + path;
       
-      // Check if the specific path variable is registered, if not register it
-      let varData = this.hierarchy.getVariable(fullVariableName);
-      if (!varData) {
-        // Try to register the sub-variable by building its nodeId
-        try {
-          const baseNodeId = this.hierarchy.getVariable(normalizedName)?.mapping.nodeId;
-          if (!baseNodeId) {
-            throw new Error(`Base variable '${originalName}' is not registered`);
-          }
-          
-          // Build nodeId for the sub-variable by appending the path
-          const subNodeId = baseNodeId.includes(';s=') 
-            ? baseNodeId + path
-            : baseNodeId + ';s=' + path;
-            
-          this.registerVariable(fullVariableName, subNodeId);
-          varData = this.hierarchy.getVariable(fullVariableName);
-          if (!varData) {
-            console.warn(`Could not retrieve registered sub-variable '${fullVariableName}'. Skipping.`);
-            continue;
-          }
-        } catch (error) {
-          console.warn(`Could not register sub-variable '${fullVariableName}': ${error}. Skipping.`);
-          continue;
-        }
-      }
-
-      // Ensure varData is not undefined
-      if (!varData) {
-        console.warn(`Could not find variable data for '${fullVariableName}'. Skipping.`);
+      try {
+        // Build nodeId dynamically for the sub-variable - no registration required
+        const subNodeId = this.buildNodeId(fullVariableName);
+        
+        batchWrites.push({
+          nodeId: subNodeId,
+          value: simpleValue,
+          path: path
+        });
+      } catch (error) {
+        console.warn(`Could not build nodeId for sub-variable '${fullVariableName}': ${error}. Skipping.`);
         continue;
       }
-
-      batchWrites.push({
-        nodeId: varData.mapping.nodeId,
-        value: simpleValue,
-        path: path
-      });
     }
 
     // Execute batch write
