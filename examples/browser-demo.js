@@ -123,6 +123,8 @@ window.connect = async function() {
             log(`Error: ${error.message}`);
         });
 
+        machine.configureReadGroup("default", {publishingInterval:50, samplingInterval:50, maxNotificationsPerPublish:1000, priority:1 });
+
         log('Connecting to OPC UA server...');
         await machine.connect();
         

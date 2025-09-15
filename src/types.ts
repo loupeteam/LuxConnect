@@ -2,8 +2,8 @@
  * OPC UA Variable interface for type-safe variable management
  */
 export interface OpcuaVariable {
-  readonly nodeId: string;
   readonly name: string;
+  readonly nodeId: string;
   readonly dataType?: string;
   value?: any;
   timestamp?: Date;

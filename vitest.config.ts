@@ -7,5 +7,8 @@ export default defineConfig({
     exclude: ['tests/**/*.browser.{test,spec}.{js,ts}'], // Exclude browser tests for now
     testTimeout: 10000,
     globals: true
+  },
+  esbuild: {
+    sourcemap: true
   }
 })

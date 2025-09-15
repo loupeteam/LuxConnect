@@ -8,10 +8,11 @@ import {
 
 interface SubscriptionInfo {
   subscriptionId: number;
-  name: string;
+  name: string;  
   monitoredItems: Map<number, MonitoredItemInfo>;
   desiredVariables: Set<string>; // Variables we want to monitor
   actualNodeIds: Set<string>;    // NodeIds we're actually monitoring
+  parameters: SubscriptionOptions; // Store options for reference
 }
 
 interface MonitoredItemInfo {
@@ -99,7 +100,8 @@ export class SubscriptionManager {
       name,
       monitoredItems: new Map(),
       desiredVariables: new Set(),
-      actualNodeIds: new Set()
+      actualNodeIds: new Set(),
+      parameters: subscriptionParams
     };
 
     this.subscriptions.set(name, subscriptionInfo);
@@ -407,33 +409,6 @@ export class SubscriptionManager {
   }
 
   /**
-   * Subscribe to an entire structure recursively (like the test interface)
-   */
-  public async subscribeToStructure(
-    subscriptionName: string,
-    rootNodeId: string,
-    maxDepth: number = 10
-  ): Promise<number> {
-    const subscription = this.subscriptions.get(subscriptionName);
-    if (!subscription) {
-      throw new Error(`Subscription '${subscriptionName}' not found`);
-    }
-
-    const nodeIds = await this.discoverStructureNodes(rootNodeId, maxDepth);
-    
-    // Add all discovered nodes to the subscription
-    for (const nodeId of nodeIds) {
-      try {
-        await this.addMonitoredItem(subscription, nodeId);
-      } catch (error) {
-        console.warn(`Failed to add node ${nodeId} to subscription:`, error);
-      }
-    }
-
-    return nodeIds.length;
-  }
-
-  /**
    * Add a monitored item to a subscription
    */
   private async addMonitoredItem(
@@ -514,45 +489,6 @@ export class SubscriptionManager {
     // Remove from local maps
     subscription.monitoredItems.delete(monitoredItemId);
     this.clientHandleMap.delete(clientHandle);
-  }
-
-  /**
-   * Discover all nodes in a structure recursively
-   */
-  private async discoverStructureNodes(rootNodeId: string, maxDepth: number): Promise<string[]> {
-    const discovered = new Set<string>();
-    const queue: Array<{ nodeId: string; depth: number }> = [{ nodeId: rootNodeId, depth: 0 }];
-
-    while (queue.length > 0) {
-      const { nodeId, depth } = queue.shift()!;
-      
-      if (depth >= maxDepth || discovered.has(nodeId)) {
-        continue;
-      }
-
-      discovered.add(nodeId);
-
-      try {
-        // Browse children
-        const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/references`, {
-          method: 'GET'
-        });
-
-        const result = await response.json();
-        
-        if (result.references) {
-          for (const ref of result.references) {
-            if (ref.nodeId?.value) {
-              queue.push({ nodeId: ref.nodeId.value, depth: depth + 1 });
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`Failed to browse node ${nodeId}:`, error);
-      }
-    }
-
-    return Array.from(discovered);
   }
 
   /**

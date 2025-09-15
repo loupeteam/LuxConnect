@@ -99,7 +99,7 @@ export class VariableManager {
       variableInfo.dataType
     );
 
-    // Convert to OpcuaVariable format for backward compatibility
+    // Convert to OpcuaVariable format
     const namedVariable: OpcuaVariable = {
       name: normalizedName,
       nodeId,
@@ -176,7 +176,6 @@ export class VariableManager {
     if (varData) {
       targetNodeId = varData.mapping.nodeId;
     } else {
-      // Generate NodeId dynamically - no registration required!
       targetNodeId = this.buildNodeId(name);
     }
 
@@ -691,35 +690,11 @@ export class VariableManager {
    * Build NodeId from variable name
    */
   private buildNodeId(varName: string): string {
-    // If varName already has OPC UA namespace prefix, use as-is
-    if (varName.includes('ns=') || varName.includes('i=') || varName.includes('s=')) {
-      return varName;
-    }
-    
-    // Parse the variable name to ensure it's in proper module::task:variable format
-    let normalizedVarName: string;
-    try {
-      const parsedPath = VariablePathParser.parse(varName);
-      
-      // Apply defaults if missing application or task
-      if (!parsedPath.application && this.defaultApplication) {
-        parsedPath.application = this.defaultApplication;
-      }
-      
-      if (!parsedPath.task || parsedPath.task === 'AsGlobalPV') {
-        if (this.defaultTask && this.defaultTask !== 'AsGlobalPV') {
-          parsedPath.task = this.defaultTask;
-        }
-      }
-      
-      // Reconstruct the normalized variable name
-      normalizedVarName = VariablePathParser.reconstruct(parsedPath);
-    } catch (error) {
-      // If parsing fails, use the variable name as-is
-      normalizedVarName = varName;
-    }
-    
-    // Combine with namespace to create full NodeId
-    return this.defaultNamespace + normalizedVarName;
+    // Pass instance-specific defaults to the centralized method
+    return VariablePathParser.buildNodeId(varName, {
+      namespace: this.defaultNamespace,
+      defaultApplication: this.defaultApplication,
+      defaultTask: this.defaultTask
+    });
   }
 }

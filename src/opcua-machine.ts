@@ -486,45 +486,23 @@ export class OpcuaMachine {
   // Private implementation methods
 
   private buildNodeId(varName: string, options: VariableOptions): string {
+    // Pass instance-specific defaults and per-call options to the centralized method
+    const buildOptions: { 
+      namespace?: string; 
+      nodeId?: string; 
+      defaultApplication?: string; 
+      defaultTask?: string; 
+    } = {
+      namespace: options.namespace || this.defaultNamespace,
+      defaultApplication: this.defaultApplication,
+      defaultTask: this.defaultTask
+    };
+    
     if (options.nodeId) {
-      return options.nodeId;
+      buildOptions.nodeId = options.nodeId;
     }
     
-    // If varName already has OPC UA namespace prefix, use as-is
-    if (varName.includes('ns=') || varName.includes('i=') || varName.includes('s=')) {
-      return varName;
-    }
-    
-    // Parse the variable name to ensure it's in proper module::task:variable format
-    let normalizedVarName: string;
-    try {
-      const parsedPath = VariablePathParser.parse(varName);
-      
-      // Apply defaults if missing application or task
-      if (!parsedPath.application && this.defaultApplication) {
-        parsedPath.application = this.defaultApplication;
-      }
-      
-      if (!parsedPath.task || parsedPath.task === 'AsGlobalPV') {
-        if (this.defaultTask && this.defaultTask !== 'AsGlobalPV') {
-          parsedPath.task = this.defaultTask;
-        }
-      }
-      
-      // Reconstruct the normalized variable name
-      normalizedVarName = VariablePathParser.reconstruct(parsedPath);
-      
-      // TODO: Consider adding configuration for required module/task validation
-      // TODO: Add validation for server-specific naming requirements
-    } catch (error) {
-      console.warn(`Failed to parse variable name '${varName}':`, error);
-      // Fallback to original name if parsing fails
-      normalizedVarName = varName;
-    }
-    
-    // Use custom namespace or default
-    const namespace = options.namespace || this.defaultNamespace;
-    return namespace + normalizedVarName;
+    return VariablePathParser.buildNodeId(varName, buildOptions);
   }
 
   private ensureReadGroup(name: string): void {
