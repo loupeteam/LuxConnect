@@ -82,6 +82,49 @@
             font-family: monospace;
             font-size: 12px;
         }
+        .log a {
+            color: #007bff;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        .log a:hover {
+            color: #0056b3;
+            background-color: #e3f2fd;
+            padding: 2px;
+            border-radius: 3px;
+        }
+        .cert-info {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+            display: none;
+        }
+        .cert-info.show {
+            display: block;
+        }
+        .cert-info h4 {
+            margin: 0 0 10px 0;
+            color: #856404;
+        }
+        .retry-button {
+            background-color: #ffc107;
+            color: #212529;
+            display: none;
+        }
+        .retry-button:hover {
+            background-color: #e0a800;
+        }
+        .retry-button.show {
+            display: inline-block;
+        }
+        .custom-api-group {
+            display: none;
+        }
+        .custom-api-group.show {
+            display: block;
+        }
         .input-group {
             margin: 10px 0;
         }
@@ -155,7 +198,7 @@
                 <option value="custom">Custom...</option>
             </select>
         </div>
-        <div class="input-group" id="customApiPathGroup" style="display: none;">
+        <div class="input-group custom-api-group" id="customApiPathGroup">
             <label for="customApiPath">Custom Path:</label>
             <input type="text" id="customApiPath" placeholder="/your/custom/path" />
         </div>
@@ -172,6 +215,19 @@
             <button id="testBtn" onclick="testConnection()" class="button-test">Test Connection</button>
             <button id="connectBtn" onclick="connect()">Connect</button>
             <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button id="retryBtn" onclick="retryAfterCert()" class="retry-button">Retry After Certificate</button>
+        </div>
+
+        <div id="cert-info" class="cert-info">
+            <h4>🔐 Certificate Acceptance Required</h4>
+            <p>A new tab has been opened for you to accept the SSL certificate. Please:</p>
+            <ol>
+                <li>Check the new browser tab that opened</li>
+                <li>Click "Advanced" or "Show Details" on the security warning</li>
+                <li>Click "Proceed to [hostname] (unsafe)" or "Continue to this website"</li>
+                <li>Return to this tab and click "Retry After Certificate"</li>
+            </ol>
+            <p><strong>Note:</strong> This only needs to be done once per browser session.</p>
         </div>
 
         <div id="status" class="status disconnected">Disconnected</div>

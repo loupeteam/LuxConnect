@@ -23,7 +23,50 @@ function updateButtons(connected) {
     document.getElementById('writeBtn').disabled = !connected;
     document.getElementById('writeArrayBtn').disabled = !connected;
     document.getElementById('logicDemoBtn').disabled = !connected;
+    
+    // Hide retry button when connected
+    if (connected) {
+        hideCertificateInfo();
+    }
 }
+
+function showCertificateInfo() {
+    const certInfo = document.getElementById('cert-info');
+    const retryBtn = document.getElementById('retryBtn');
+    
+    if (certInfo) {
+        certInfo.classList.add('show');
+    }
+    if (retryBtn) {
+        retryBtn.classList.add('show');
+    }
+}
+
+function hideCertificateInfo() {
+    const certInfo = document.getElementById('cert-info');
+    const retryBtn = document.getElementById('retryBtn');
+    
+    if (certInfo) {
+        certInfo.classList.remove('show');
+    }
+    if (retryBtn) {
+        retryBtn.classList.remove('show');
+    }
+}
+
+window.retryAfterCert = function() {
+    log('🔄 Retrying connection after certificate acceptance...');
+    hideCertificateInfo();
+    
+    // Try testing the connection first
+    testConnection().then(() => {
+        // If test succeeds, try to connect
+        log('💡 Test successful! Attempting full connection...');
+        setTimeout(() => connect(), 1000);
+    }).catch(() => {
+        log('⚠️ Test still failing. Make sure you accepted the certificate in the other tab.');
+    });
+};
 
 window.testConnection = async function() {
     try {
@@ -61,15 +104,49 @@ window.testConnection = async function() {
     } catch (error) {
         log(`❌ Connection test failed: ${error.message}`);
         
-        if (error.message.includes('Certificate') || error.message.includes('certificate')) {
-            log('💡 SSL/Certificate Issue: For HTTPS connections, accept the certificate:');
+        if (error.message.includes('Certificate') || error.message.includes('certificate') || 
+            error.message.includes('authority') || error.message.includes('net::err_cert') ||
+            error.message.includes('sec_error') || error.message.includes('insecure') ||
+            error.message.includes('SSL') || error.message.includes('TLS')) {
+            
+            log('� SSL/Certificate Issue: Opening certificate acceptance page...');
             const protocol = document.getElementById('protocol').value;
             const host = document.getElementById('host').value;
             const port = parseInt(document.getElementById('port').value);
             const baseUrl = `${protocol}://${host}:${port}`;
-            log(`   1. Open ${baseUrl} in a new browser tab`);
-            log('   2. Accept the security warning (click "Advanced" then "Proceed"');
-            log('   3. Come back here and test connection again');
+            
+            // Automatically open the certificate acceptance page in a new tab
+            const certWindow = window.open(baseUrl, '_blank');
+            
+            if (certWindow) {
+                log(`✅ Opened certificate page in new tab: ${baseUrl}`);
+                showCertificateInfo();
+                log('📋 Please follow the instructions above to accept the certificate');
+                
+                // Add a visual indicator
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = '🔐 Certificate acceptance required - check new tab';
+                statusElement.className = 'status connecting';
+            } else {
+                log('⚠️ Popup blocked! Please allow popups for this site or manually open:');
+                showCertificateInfo();
+                
+                // Create a clickable link in the log for manual opening
+                const logElement = document.getElementById('log');
+                const linkElement = document.createElement('a');
+                linkElement.href = baseUrl;
+                linkElement.target = '_blank';
+                linkElement.textContent = `🔗 Click here to open certificate page: ${baseUrl}`;
+                linkElement.style.color = '#007bff';
+                linkElement.style.textDecoration = 'underline';
+                linkElement.style.cursor = 'pointer';
+                
+                const timestamp = new Date().toLocaleTimeString();
+                logElement.innerHTML += `[${timestamp}] `;
+                logElement.appendChild(linkElement);
+                logElement.innerHTML += '\n';
+                logElement.scrollTop = logElement.scrollHeight;
+            }
         } else if (error.message.includes('Network') || error.message.includes('fetch')) {
             log('💡 Network Issue: Check that the server is running and accessible');
             log('   - Verify the host and port are correct');
@@ -133,15 +210,50 @@ window.connect = async function() {
 
     } catch (error) {
         log(`❌ Connection failed: ${error.message}`);
-        if (error.message.includes('fetch')) {
+        
+        if (error.message.includes('Certificate') || error.message.includes('certificate') || 
+            error.message.includes('authority') || error.message.includes('net::err_cert') ||
+            error.message.includes('sec_error') || error.message.includes('insecure') ||
+            error.message.includes('SSL') || error.message.includes('TLS') ||
+            error.message.includes('Certificate/SSL Error') || error.message.includes('Certificate/Authority Error')) {
+            
+            log('🔐 SSL/Certificate Issue: Opening certificate acceptance page...');
+            const protocol = document.getElementById('protocol').value;
+            const host = document.getElementById('host').value;
+            const port = parseInt(document.getElementById('port').value);
+            const baseUrl = `${protocol}://${host}:${port}`;
+            
+            // Automatically open the certificate acceptance page in a new tab
+            const certWindow = window.open(baseUrl, '_blank');
+            
+            if (certWindow) {
+                log(`✅ Opened certificate page in new tab: ${baseUrl}`);
+                showCertificateInfo();
+                log('📋 Please follow the instructions above to accept the certificate');
+            } else {
+                log('⚠️ Popup blocked! Manually open this URL to accept the certificate:');
+                showCertificateInfo();
+                
+                const logElement = document.getElementById('log');
+                const linkElement = document.createElement('a');
+                linkElement.href = baseUrl;
+                linkElement.target = '_blank';
+                linkElement.textContent = `🔗 ${baseUrl}`;
+                linkElement.style.color = '#007bff';
+                linkElement.style.textDecoration = 'underline';
+                
+                const timestamp = new Date().toLocaleTimeString();
+                logElement.innerHTML += `[${timestamp}] `;
+                logElement.appendChild(linkElement);
+                logElement.innerHTML += '\n';
+                logElement.scrollTop = logElement.scrollHeight;
+            }
+        } else if (error.message.includes('fetch')) {
             log('💡 CORS Issue: Your mapp Connect server needs CORS headers');
             log('💡 Add these headers to your OPC UA server responses:');
             log('   Access-Control-Allow-Origin: *');
             log('   Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
             log('   Access-Control-Allow-Headers: Content-Type, Authorization');
-        } else if (error.message.includes('certificate') || error.message.includes('SSL')) {
-            log('💡 SSL/TLS Issue: For HTTPS/WSS, ensure valid certificates');
-            log('💡 For development, you may need to accept self-signed certificates');
         } else if (error.message.includes('404')) {
             log('💡 API Path Issue: The API endpoints were not found');
             log('💡 Try different API paths from the dropdown:');
@@ -498,6 +610,7 @@ function initializeDemo() {
     log('💡 This demonstrates cross-platform compatibility!');
     updateButtons(false);
     updateStatus('disconnected');
+    hideCertificateInfo(); // Hide certificate info initially
 
     // Set default preset to mapp Connect 8443
     document.getElementById('preset').value = 'mappConnect8443';
@@ -582,10 +695,10 @@ function initializeDemo() {
         const customGroup = document.getElementById('customApiPathGroup');
         
         if (apiPath === 'custom') {
-            customGroup.style.display = 'block';
+            customGroup.classList.add('show');
             log('📝 Custom API path selected - enter your path below');
         } else {
-            customGroup.style.display = 'none';
+            customGroup.classList.remove('show');
             log(`📡 API path changed to: ${apiPath || '/ (root)'}`);
         }
     });
