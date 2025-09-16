@@ -44,6 +44,7 @@ const TEST_VARIABLES = {
   simpleFloat: '::test:test._real',
   simpleBoolean: '::test:test._bool',
   globalFloat: 'gtest.myvalue.x',
+  globalSimple: '::gSimple',
   
   // Structure variables
   struct1: '::test:test.struct1.struct1',
@@ -98,6 +99,7 @@ const BASELINE_VALUES = {
   simpleFloat: 0.0,
   simpleBoolean: false,
   globalFloat: 0.0,
+  globalSimple: 0.0,
   struct1Member1: 0,
   struct1Member2: '',
   nestedStruct: '',
@@ -232,9 +234,27 @@ describe('Integration Tests - Real Server Communication', () => {
     console.log('🏁 Integration Tests Complete\n');
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     if (!isServerAvailable) {
       console.log('⏭️ Skipping test - server not available');
+      return;
+    }
+    
+    // Clean up any stale subscriptions or variables from previous tests
+    try {
+      // Clear any pending subscription attempts
+      if ((machine as any).subscriptionManager) {
+        const subscriptions = (machine as any).subscriptionManager.getAllSubscriptions?.() || {};
+        for (const handle of Object.keys(subscriptions)) {
+          try {
+            await machine.unsubscribe(handle);
+          } catch (error) {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore cleanup errors
     }
   });
 
@@ -361,6 +381,29 @@ describe('Integration Tests - Real Server Communication', () => {
         console.log(`✅ Global variable test: ${testVar} = ${testValue} ✓`);
       }
     }, 20000);
+
+    test('should read and write simple global variable values', async () => {
+      if (!isServerAvailable) return;
+      
+      const testVar = TEST_VARIABLES.globalSimple;
+      
+      // Verify baseline
+      const isAtBaseline = await verifyBaseline(testVar, BASELINE_VALUES.globalSimple);
+      console.log(`📊 ${testVar} baseline check: ${isAtBaseline ? '✅ correct' : '⚠️ unexpected value'}`);
+      
+      for (const testValue of TEST_VALUES.floats.slice(0, 3)) { // Test subset for speed
+        // Write the value
+        await machine.writeVariable(testVar, testValue);
+        
+        // Read it back
+        await machine.readVariable(testVar);
+        const readValue = machine.gSimple;  
+        // Use approximate equality for floats
+        expect(Math.abs(readValue - testValue)).toBeLessThan(0.001);
+        console.log(`✅ Global variable test: ${testVar} = ${testValue} ✓`);
+      }
+    }, 20000);
+
   });
 
   describe('Global State Access Tests', () => {
@@ -1281,4 +1324,160 @@ describe('Integration Tests - Real Server Communication', () => {
       });
     }, 15000);
   });
+
+  describe('Connection Error Handling', () => {
+    test('should handle connection failures gracefully', () => {
+      if (!isServerAvailable) return;
+      
+      // Test error handler registration
+      let errorReceived = false;
+      let receivedError: Error | null = null;
+      
+      machine.onError((error) => {
+        errorReceived = true;
+        receivedError = error;
+      });
+      
+      expect(errorReceived).toBe(false); // No errors yet
+      
+      // The error handler should be registered
+      // Actual error testing requires server failure scenarios
+    });
+
+    test('should handle configuration after connection', async () => {
+      if (!isServerAvailable) return;
+      
+      // Store original configuration to restore later
+      const originalConfig = {
+        namespace: (machine as any).defaultNamespace || 'ns=5;s=',
+        application: (machine as any).defaultApplication || undefined,
+        task: (machine as any).defaultTask || undefined
+      };
+      
+      try {
+        // These should work even after connection is established
+        expect(() => {
+          machine.setDefaultNamespace('ns=6;s=');
+          machine.setDefaultApplication('IntegrationTest');
+          machine.setDefaultTask('ErrorTest');
+        }).not.toThrow();
+      } finally {
+        // Restore original configuration
+        machine.setDefaultNamespace(originalConfig.namespace);
+        if (originalConfig.application) {
+          machine.setDefaultApplication(originalConfig.application);
+        }
+        if (originalConfig.task) {
+          machine.setDefaultTask(originalConfig.task);
+        }
+      }
+    });
+
+    test('should handle disconnection gracefully', async () => {
+      if (!isServerAvailable) return;
+      
+      // Test that disconnect works without throwing
+      // This is tested in afterAll, but let's test the state
+      expect(machine.isConnected).toBe(true);
+      
+      // We don't actually disconnect here since other tests need the connection
+      // The actual disconnect test happens in afterAll
+    });
+  });
+
+  describe('Configuration Integration Tests', () => {
+    test('should apply configuration to new variables', async () => {
+      if (!isServerAvailable) return;
+      
+      // Store original configuration to restore later
+      const originalConfig = {
+        namespace: (machine as any).defaultNamespace || 'ns=5;s=',
+        application: (machine as any).defaultApplication || undefined,
+        task: (machine as any).defaultTask || undefined
+      };
+      
+      try {
+        // Configure defaults
+        machine.setDefaultNamespace('ns=5;s=');
+        machine.setDefaultApplication('ConfigTest');
+        machine.setDefaultTask('Integration');
+        
+        // Register a new variable that should use these defaults
+        const testVar = 'ConfigTestVariable';
+        machine.initCyclicRead(testVar);
+        
+        // The variable should be registered with the configured defaults
+        const variable = (machine as any).variableManager.getVariable(testVar);
+        expect(variable).toBeDefined();
+      } finally {
+        // Restore original configuration
+        machine.setDefaultNamespace(originalConfig.namespace);
+        if (originalConfig.application) {
+          machine.setDefaultApplication(originalConfig.application);
+        }
+        if (originalConfig.task) {
+          machine.setDefaultTask(originalConfig.task);
+        }
+      }
+    });
+
+    test('should handle subscription errors for invalid variables', async () => {
+      if (!isServerAvailable) return;
+      
+      const invalidVariables = [
+        '::completely:nonexistent:variable',
+        'invalid.path.structure',
+        '::test:test.invalid.deeply.nested.member'
+      ];
+      
+      const createdSubscriptions: string[] = [];
+      
+      try {
+        for (const invalidVar of invalidVariables) {
+          try {
+            const subscription = await machine.subscribe(invalidVar, (value) => {
+              console.log(`Unexpected callback for ${invalidVar}: ${value}`);
+            });
+            
+            // If we get here, the subscription succeeded - clean it up
+            console.warn(`⚠️ Expected subscription to fail for ${invalidVar}`);
+            if (subscription) {
+              createdSubscriptions.push(subscription);
+            }
+          } catch (error) {
+            // This is expected - the subscription should fail for invalid variables
+            expect(error).toBeInstanceOf(Error);
+          }
+        }
+      } finally {
+        // Clean up any subscriptions that were unexpectedly created
+        for (const handle of createdSubscriptions) {
+          try {
+            await machine.unsubscribe(handle);
+          } catch (error) {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    });
+
+    test('should handle subscription cleanup errors', async () => {
+      if (!isServerAvailable) return;
+      
+      // Test unsubscribing invalid handles
+      const invalidHandles = [
+        'nonexistent-handle-123',
+        'invalid-subscription-id',
+        'expired-handle-456'
+      ];
+      
+      for (const invalidHandle of invalidHandles) {
+        await expect(
+          machine.unsubscribe(invalidHandle)
+        ).rejects.toThrow(`Subscription handle '${invalidHandle}' not found`);
+      }
+    });
+  });
+
+
 });

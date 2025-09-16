@@ -20,6 +20,7 @@
           <Variable Name="ints" RecursiveEnable="2" />
         </Variable>
       </Variable>
+      <Variable Name="gSimple" />
     </GlobalVariables>
     <Task Name="Page">
       <Variable Name="MyVar" RecursiveEnable="2" />

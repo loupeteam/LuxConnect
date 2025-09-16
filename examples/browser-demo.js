@@ -517,7 +517,7 @@ function initializeDemo() {
         switch(preset) {
             case 'mappConnect8443':
                 protocolSelect.value = 'https';
-                hostInput.value = 'localhost';
+                hostInput.value = '127.0.0.1';
                 portInput.value = '8443';
                 wsProtocolSelect.value = 'wss';
                 apiPathSelect.value = '/api/1.0';
@@ -527,23 +527,23 @@ function initializeDemo() {
                 break;
             case 'mappConnect80':
                 protocolSelect.value = 'http';
-                hostInput.value = 'localhost';
+                hostInput.value = '127.0.0.1';
                 portInput.value = '80';
                 wsProtocolSelect.value = 'ws';
                 apiPathSelect.value = '/opcua';
                 log('🔧 Preset: mapp Connect HTTP (80) with /opcua');
                 break;
-            case 'localhost443':
+            case '127.0.0.1443':
                 protocolSelect.value = 'https';
-                hostInput.value = 'localhost';
+                hostInput.value = '127.0.0.1';
                 portInput.value = '443';
                 wsProtocolSelect.value = 'wss';
                 apiPathSelect.value = '/api/1.0';
                 log('🔧 Preset: Local HTTPS (443) with /api/1.0');
                 break;
-            case 'localhost80':
+            case '127.0.0.180':
                 protocolSelect.value = 'http';
-                hostInput.value = 'localhost';
+                hostInput.value = '127.0.0.1';
                 portInput.value = '80';
                 wsProtocolSelect.value = 'ws';
                 apiPathSelect.value = '/opcua';

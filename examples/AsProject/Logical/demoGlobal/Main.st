@@ -2,6 +2,7 @@
 PROGRAM _INIT
 	gtest;
 	testarray;	
+	gSimple;
 END_PROGRAM
 
 PROGRAM _CYCLIC

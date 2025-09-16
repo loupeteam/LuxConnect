@@ -3,7 +3,5 @@
 <Package SubType="mappConnectWwwRootPackage" PackageType="mappConnectWwwRootPackage" xmlns="http://br-automation.co.at/AS/Package">
   <Objects>
     <Object Type="File">index.html</Object>
-    <Object Type="File">README.md</Object>
-    <Object Type="File">api-test.js</Object>
   </Objects>
 </Package>
