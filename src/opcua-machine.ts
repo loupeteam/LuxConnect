@@ -201,6 +201,20 @@ export class OpcuaMachine {
     this.connection.onError(handler);
   }
 
+  /**
+   * Manually trigger subscription recovery
+   * Useful for testing or when connection issues are detected
+   */
+  public async recoverSubscriptions(): Promise<void> {
+    if (!this.isConnected) {
+      throw new Error('Cannot recover subscriptions - not connected');
+    }
+    
+    console.log('Manually triggering subscription recovery...');
+    await this.subscriptionManager.recoverAllSubscriptions();
+    console.log('Manual subscription recovery completed');
+  }
+
   // Variable management (lux.js style)
 
   /**
@@ -698,6 +712,25 @@ export class OpcuaMachine {
     // WebSocket notifications are now handled by SubscriptionManager
     // No need for additional setup here since SubscriptionManager will
     // automatically update VariableManager when notifications arrive
+    
+    // Monitor connection state for subscription recovery
+    this.connection.onConnectionStateChanged(async (state) => {
+      if (state === 'connected') {
+        // Check if this is a reconnection (we had subscriptions before)
+        const allSubscriptions = this.subscriptionManager.getAllSubscriptions();
+        if (allSubscriptions.size > 0) {
+          console.log('Connection restored - recovering subscriptions...');
+          try {
+            await this.subscriptionManager.recoverAllSubscriptions();
+            console.log('✅ Subscription recovery completed');
+          } catch (error) {
+            console.error('❌ Subscription recovery failed:', error);
+          }
+        }
+      } else if (state === 'reconnecting') {
+        console.log('Connection lost - subscriptions will be recovered after reconnection');
+      }
+    });
   }
 }
 

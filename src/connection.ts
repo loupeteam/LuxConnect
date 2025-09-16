@@ -12,8 +12,12 @@ const isBrowser = typeof window !== 'undefined';
 // Platform-specific WebSocket handling
 class WebSocketManager {
   private ws: any = null;
+  private isClosingProgrammatically = false;
 
   async create(url: string, headers?: Record<string, string>): Promise<void> {
+    // Always close existing WebSocket first to prevent old connections from reconnecting
+    this.close();
+    
     if (isBrowser) {
       // Browser WebSocket - cookies are handled automatically by the browser
       this.ws = new WebSocket(url);
@@ -37,7 +41,7 @@ class WebSocketManager {
   setupEvents(
     onOpen: () => void,
     onError: (error: any) => void, 
-    onClose: () => void,
+    onClose: (event?: any) => void,
     onMessage: (data: string) => void
   ): void {
     if (!this.ws) return;
@@ -46,13 +50,23 @@ class WebSocketManager {
       // Browser WebSocket API
       this.ws.onopen = onOpen;
       this.ws.onerror = onError;
-      this.ws.onclose = onClose;
+      this.ws.onclose = (event: CloseEvent) => {
+        // Don't trigger reconnection if this was a programmatic close
+        if (!this.isClosingProgrammatically) {
+          onClose(event);
+        }
+      };
       this.ws.onmessage = (event: MessageEvent) => onMessage(event.data);
     } else {
       // Node.js ws package API
       this.ws.on('open', onOpen);
       this.ws.on('error', onError);
-      this.ws.on('close', onClose);
+      this.ws.on('close', (code: number, reason: string) => {
+        // Don't trigger reconnection if this was a programmatic close
+        if (!this.isClosingProgrammatically) {
+          onClose({ code, reason });
+        }
+      });
       this.ws.on('message', (data: Buffer) => onMessage(data.toString()));
     }
   }
@@ -65,8 +79,26 @@ class WebSocketManager {
 
   close(): void {
     if (this.ws) {
-      this.ws.close();
+      this.isClosingProgrammatically = true;
+      
+      // Remove event listeners first to prevent unwanted reconnection attempts
+      if (isBrowser) {
+        this.ws.onopen = null;
+        this.ws.onerror = null;
+        this.ws.onclose = null;
+        this.ws.onmessage = null;
+      } else {
+        this.ws.removeAllListeners();
+      }
+      
+      // Close the connection
+      if (this.ws.readyState === (this.ws.OPEN || 1) || 
+          this.ws.readyState === (this.ws.CONNECTING || 0)) {
+        this.ws.close(1000, 'Connection closed programmatically'); // Normal closure
+      }
+      
       this.ws = null;
+      this.isClosingProgrammatically = false;
     }
   }
 
@@ -175,6 +207,36 @@ export class OpcuaConnection {
 
     this.sessionInfo = null;
     this.setState(ConnectionState.DISCONNECTED);
+  }
+
+  /**
+   * Force reconnection with session recovery
+   * Useful when connection issues are detected externally
+   */
+  public async reconnect(): Promise<void> {
+    if (this.connectionState === ConnectionState.DISCONNECTED) {
+      // If completely disconnected, just do a normal connect
+      return this.connect();
+    }
+    
+    try {
+      this.setState(ConnectionState.RECONNECTING);
+      console.log('Manual reconnection initiated...');
+      
+      // Close existing WebSocket
+      this.webSocketManager.close();
+      
+      // Perform full connection recovery
+      await this.recoverConnection();
+      
+      this.setState(ConnectionState.CONNECTED);
+      console.log('Manual reconnection completed successfully');
+      
+    } catch (error) {
+      this.setState(ConnectionState.DISCONNECTED);
+      this.handleError(error as Error);
+      throw error;
+    }
   }
 
   /**
@@ -377,6 +439,15 @@ export class OpcuaConnection {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn(`mapp Connect endpoint failed: ${message}`);
+      
+      // Enhanced error categorization for HTTPS certificate issues
+      if (this.config.protocol === 'https' && message.toLowerCase().includes('failed to fetch')) {
+        // For HTTPS connections, "Failed to fetch" is often a certificate issue
+        throw new Error(`Certificate/SSL Error: Unable to connect to HTTPS server at ${this.baseUrl}. 
+This is likely due to an untrusted certificate. Please open ${this.baseUrl} in your browser and accept the security certificate, then try again.
+Original error: ${message}`);
+      }
+      
       throw this.categorizeConnectionError(error as Error, testUrl);
     }
   }
@@ -386,6 +457,7 @@ export class OpcuaConnection {
    */
   private categorizeConnectionError(error: Error, url: string): Error {
     const errorMsg = error.message.toLowerCase();
+    const originalMessage = error.message;
     
     // TODO: Add more specific error detection patterns
     // TODO: Consider adding error codes for programmatic handling
@@ -393,14 +465,36 @@ export class OpcuaConnection {
     if (errorMsg.includes('certificate') || errorMsg.includes('ssl') || errorMsg.includes('tls') || 
         errorMsg.includes('authority') || errorMsg.includes('net::err_cert') || 
         errorMsg.includes('sec_error') || errorMsg.includes('insecure')) {
-      return new Error(`Certificate/Authority Error for ${url}. 
-Please accept the server certificate by opening ${this.baseUrl} in your browser and accepting the security warning.`);
+      return new Error(`Certificate/Authority Error: ${originalMessage}
+        
+🔐 Certificate Issue Detected:
+This appears to be an SSL/TLS certificate problem. To resolve this:
+1. Open ${this.baseUrl} in your browser
+2. Accept the security warning (click "Advanced" then "Proceed")
+3. Return here and try connecting again
+
+Original error: ${originalMessage}`);
     } else if (errorMsg.includes('failed to fetch') || errorMsg.includes('networkerror') || errorMsg.includes('network')) {
-      return new Error(`Network Error for ${url}. Check if the server is running and the URL is correct.`);
+      return new Error(`Network Error: ${originalMessage}
+
+🌐 Connection Issue:
+Cannot reach the server at ${url}. Please check:
+1. Server is running and accessible
+2. URL and port are correct  
+3. Firewall settings allow the connection
+
+Original error: ${originalMessage}`);
     } else if (errorMsg.includes('cors')) {
-      return new Error(`CORS Error for ${url}. The server may not allow cross-origin requests.`);
+      return new Error(`CORS Error: ${originalMessage}
+
+🚫 Cross-Origin Request Blocked:
+The server needs to allow requests from this origin.
+Server configuration may need CORS headers.
+
+Original error: ${originalMessage}`);
     } else {
-      return new Error(`Connection error for ${url}: ${error.message}`);
+      // Preserve the original error message for unknown errors
+      return new Error(`Connection error for ${url}: ${originalMessage}`);
     }
   }
 
@@ -718,18 +812,28 @@ Auth data: ${JSON.stringify(authData)}`);
         
         this.webSocketManager.setupEvents(
           () => {
-            console.log('WebSocket connected');
+            console.log('WebSocket connected successfully');
             resolve();
           },
           (error: any) => {
-            console.error('WebSocket error:', error);
+            console.error('WebSocket connection error:', error);
             reject(error);
           },
-          () => {
-            console.log('WebSocket disconnected');
-            if (this.isConnected) {
-              // Attempt reconnection if we're supposed to be connected
+          (event: any) => {
+            const code = event?.code || 'unknown';
+            const reason = event?.reason || 'No reason provided';
+            console.log(`WebSocket disconnected - Code: ${code}, Reason: ${reason}`);
+            
+            // Only attempt reconnection if we're supposed to be connected
+            // and this isn't a normal close (1000) or going away (1001)
+            if (this.isConnected && code !== 1000 && code !== 1001) {
+              console.log('Unexpected WebSocket disconnection, attempting recovery...');
               this.scheduleReconnect();
+            } else if (this.isConnected) {
+              console.log('WebSocket closed normally, but connection should still be active - scheduling reconnect...');
+              this.scheduleReconnect();
+            } else {
+              console.log('WebSocket closed during expected disconnection');
             }
           },
           (data: string) => {
@@ -772,22 +876,110 @@ Auth data: ${JSON.stringify(authData)}`);
   }
 
   /**
-   * Schedule reconnection attempt
+   * Schedule reconnection attempt with full session recovery
    */
   private scheduleReconnect(): void {
+    // Prevent multiple concurrent reconnection attempts
     if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
+      console.log('Reconnection already scheduled, skipping duplicate request');
+      return;
+    }
+    
+    // Don't schedule reconnection if we're already reconnecting or disconnecting
+    if (this.connectionState === ConnectionState.RECONNECTING || 
+        this.connectionState === ConnectionState.DISCONNECTING ||
+        this.connectionState === ConnectionState.DISCONNECTED) {
+      console.log(`Skipping reconnection - current state: ${this.connectionState}`);
+      return;
     }
 
+    console.log('Scheduling reconnection in 5 seconds...');
     this.reconnectTimer = setTimeout(async () => {
+      // Clear the timer reference immediately to allow future reconnection scheduling
+      this.reconnectTimer = null;
+      
       try {
+        console.log('Starting reconnection with session recovery...');
         this.setState(ConnectionState.RECONNECTING);
-        await this.connectWebSocket();
+        
+        // First, try to reconnect WebSocket with existing session
+        try {
+          await this.connectWebSocket();
+          console.log('WebSocket reconnected with existing session');
+          this.setState(ConnectionState.CONNECTED);
+          return;
+        } catch (wsError) {
+          console.log('WebSocket reconnection with existing session failed, creating new session...', wsError);
+        }
+        
+        // If WebSocket reconnection fails, the session is likely invalid
+        // Create a new session and then connect WebSocket
+        await this.recoverConnection();
+        
         this.setState(ConnectionState.CONNECTED);
+        console.log('Connection recovery completed successfully');
+        
       } catch (error) {
         console.error('Reconnection failed:', error);
-        this.scheduleReconnect(); // Try again
+        this.handleError(error as Error);
+        
+        // Only schedule another reconnect if we're still supposed to be connected
+        if (this.connectionState !== ConnectionState.DISCONNECTED && 
+            this.connectionState !== ConnectionState.DISCONNECTING) {
+          this.scheduleReconnect(); // Try again
+        }
       }
     }, 5000); // Retry after 5 seconds
+  }
+
+  /**
+   * Recover connection by creating new session and reconnecting WebSocket
+   */
+  private async recoverConnection(): Promise<void> {
+    console.log('Recovering connection with new session...');
+    
+    // Clear old session info
+    const oldSessionId = this.sessionInfo?.sessionId;
+    this.sessionInfo = null;
+    
+    try {
+      // Attempt to delete the old session (best effort, may fail if server is down)
+      if (oldSessionId) {
+        try {
+          const deleteUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${oldSessionId}`;
+          await fetch(deleteUrl, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${oldSessionId}` }
+          });
+          console.log('Old session deleted successfully');
+        } catch (deleteError) {
+          console.warn('Could not delete old session (server may be unreachable):', deleteError);
+        }
+      }
+      
+      // Test server accessibility
+      await this.testCertificate();
+      
+      // Create new session
+      await this.createSession();
+      if (this.sessionInfo) {
+        console.log('New session created:', (this.sessionInfo as SessionInfo).sessionId);
+      } else {
+        console.log('New session creation completed but sessionInfo is null');
+      }
+      
+      // Restart session keep-alive
+      this.startSessionKeepAlive();
+      
+      // Connect WebSocket with new session
+      if (this.config.enableWebSocket) {
+        await this.connectWebSocket();
+        console.log('WebSocket connected with new session');
+      }
+      
+    } catch (error) {
+      console.error('Connection recovery failed:', error);
+      throw error;
+    }
   }
 }

@@ -418,6 +418,72 @@ export class SubscriptionManager {
   }
 
   /**
+   * Recover all subscriptions after reconnection
+   * This recreates all subscriptions and monitored items with the new session
+   */
+  public async recoverAllSubscriptions(): Promise<void> {
+    console.log('Recovering subscriptions after reconnection...');
+    
+    // Store current subscription configurations
+    const subscriptionConfigs: Array<{
+      name: string;
+      parameters: SubscriptionOptions;
+      variables: Set<string>;
+    }> = [];
+    
+    // Collect all current subscription configurations
+    for (const [name, subscription] of this.subscriptions) {
+      subscriptionConfigs.push({
+        name,
+        parameters: subscription.parameters,
+        variables: new Set(subscription.desiredVariables)
+      });
+    }
+    
+    // Clear current subscriptions (they're invalid with the old session)
+    this.clearAllSubscriptions();
+    
+    console.log(`Recreating ${subscriptionConfigs.length} subscriptions...`);
+    
+    // Recreate each subscription
+    for (const config of subscriptionConfigs) {
+      try {
+        console.log(`Recreating subscription: ${config.name}`);
+        
+        // Create the subscription
+        await this.createSubscription(config.name, config.parameters);
+        
+        // Add all variables back to the subscription
+        for (const variableName of config.variables) {
+          try {
+            await this.addVariable(config.name, variableName);
+          } catch (error) {
+            console.warn(`Failed to re-add variable ${variableName} to subscription ${config.name}:`, error);
+          }
+        }
+        
+        console.log(`✅ Recreated subscription: ${config.name} with ${config.variables.size} variables`);
+      } catch (error) {
+        console.error(`Failed to recreate subscription ${config.name}:`, error);
+      }
+    }
+    
+    console.log('Subscription recovery completed');
+  }
+
+  /**
+   * Clear all subscriptions without making API calls
+   * Used during reconnection when old subscriptions are invalid
+   */
+  public clearAllSubscriptions(): void {
+    console.log('Clearing all subscription state...');
+    this.subscriptions.clear();
+    this.clientHandleMap.clear();
+    this.clientHandleCounter = 1;
+    console.log('Subscription state cleared');
+  }
+
+  /**
    * Add a monitored item to a subscription
    */
   private async addMonitoredItem(
