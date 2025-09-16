@@ -10,7 +10,16 @@
   <Module Name="&lt;Default&gt;">
     <GlobalVariables Name="Global Variables">
       <Variable Name="gtest" RecursiveEnable="2" />
-      <Variable Name="testarray" RecursiveEnable="2" />
+      <Variable Name="testarray" RecursiveEnable="2">
+        <Variable Name="TestOffsetArray">
+          <Variable Name="standard" RecursiveEnable="2" />
+          <Variable Name="offset" RecursiveEnable="2" />
+        </Variable>
+        <Variable Name="New_Member1">
+          <Variable Name="reals" RecursiveEnable="2" />
+          <Variable Name="ints" RecursiveEnable="2" />
+        </Variable>
+      </Variable>
     </GlobalVariables>
     <Task Name="Page">
       <Variable Name="MyVar" RecursiveEnable="2" />
@@ -35,6 +44,19 @@
       <Variable Name="random_selector" />
       <Variable Name="structure_size" />
       <Variable Name="word_ref" />
+    </Task>
+    <Task Name="test">
+      <Variable Name="test" RecursiveEnable="2" />
+      <Variable Name="test_arrays" RecursiveEnable="2">
+        <Variable Name="TestOffsetArray">
+          <Variable Name="standard" RecursiveEnable="2" />
+          <Variable Name="offset" RecursiveEnable="2" />
+        </Variable>
+        <Variable Name="New_Member1">
+          <Variable Name="reals" RecursiveEnable="2" />
+          <Variable Name="ints" RecursiveEnable="2" />
+        </Variable>
+      </Variable>
     </Task>
   </Module>
 </OpcUaSource>
