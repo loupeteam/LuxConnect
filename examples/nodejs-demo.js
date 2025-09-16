@@ -62,8 +62,8 @@ async function simpleDemo() {
     
     // Configure a read group for receiving updates
     machine.configureReadGroup("default", {
-      publishingInterval: 1000,  // Update every 1 second
-      samplingInterval: 500,     // Sample every 500ms
+      publishingInterval: 50,  // Update every 1 second
+      samplingInterval: 50,     // Sample every 500ms
       maxNotificationsPerPublish: 1000,
       priority: 1
     });
@@ -71,26 +71,45 @@ async function simpleDemo() {
     console.log('📊 Adding variables for monitoring...');
     
     // Add some example variables (adjust these paths to match your PLC variables)
-    
+
     // Example 1: A simple test structure
-    machine.initCyclicRead('::demo:test', (value) => {
-      console.log(`📈 TestStruct: ${JSON.stringify(value, null, 2)}`);
-    });
+    // machine.initCyclicRead('::demo:test', (value) => {
+      // console.log(`📈 TestStruct: ${JSON.stringify(value, null, 2)}`);
+    // });
 
-    // Example 2: Individual structure members
-    machine.initCyclicRead('::demo:test.command', (value) => {
-      console.log(`🎛️  Command: ${value}`);
-    });
+    // // Example 2: Individual structure members
+    // machine.initCyclicRead('::demo:test.command', (value) => {
+    //   console.log(`🎛️  Command: ${value}`);
+    // });
 
-    machine.initCyclicRead('::demo:test.slider', (value) => {
-      console.log(`📊 Slider: ${value}`);
-    });
+    // machine.initCyclicRead('::demo:test.slider', (value) => {
+    //   console.log(`📊 Slider: ${value}`);
+    // });
 
-    // Example 3: A global variable
-    machine.initCyclicRead('gtest.myvalue.x', (value) => {
-      console.log(`🌍 Global test value: ${value}`);
-    });
+    // // Example 3: A global variable
+    // machine.initCyclicRead('gtest.myvalue.x', (value) => {
+    //   console.log(`🌍 Global test value: ${value}`);
+    // });
 
+    // let doubleArray = await machine.readVariable('::testarray.doubleArray');
+
+    // console.log(`📝 Initial read return : = ${JSON.stringify(doubleArray)}`);
+    // console.log(`📝 Initial read global structure: = ${JSON.stringify(machine.testarray.doubleArray)}`);
+    // let value = machine.testarray.doubleArray[0][0].member1 + 1;
+    // console.log(`📝 read incremented value: = ${value}`);
+    // await machine.writeVariable('::testarray.doubleArray[0,0]', {member1: value});
+    // await machine.readVariable('::testarray.doubleArray[0,0]');
+    // console.log(`📝 Final read: = ${JSON.stringify(machine.testarray.doubleArray[0][0].member1)}`);
+
+    await machine.writeVariable('::testarray.doubleArray[0,2]', {member1: 100});
+    // let member1 = await machine.readVariable('::testarray.doubleArray[0,2].member1');
+    let member1 = await machine.readVariable('::testarray.doubleArray');
+    await machine.writeVariable('::testarray.doubleArrayOffset1[1,1]', {member1: 100});
+    console.log(`📝 Final read of member1: = ${JSON.stringify(member1)}`);
+    console.log(`📝 Final read of single item: = ${machine.testarray.doubleArray[0][2].member1}`);
+
+    let doubleArrayOffset = await machine.readVariable('::testarray.doubleArrayOffset1');
+    console.log(`📝 Final read of doubleArrayOffset1: = ${JSON.stringify(doubleArrayOffset)}`);
     console.log('✅ Variables added to cyclic reading\n');
 
     // Enable the read group to start receiving data
@@ -106,16 +125,18 @@ async function simpleDemo() {
       
       try {
         // Read some values explicitly (one-time reads)
-        const testValue = await machine.readVariable('::demo:test.command');
-        const globalValue = await machine.readVariable('gtest.myvalue.x');
-        
-        console.log(`[${counter}] Explicit reads: test.command=${testValue}, global.x=${globalValue}`);
-        
+        machine.readVariable('::demo:test.command').then(v=>{
+          console.log(`📝 Explicit read: test.command=${v}`);
+        });
+        await machine.readVariable('gtest.myvalue.x').then(v=>{
+          console.log(`📝 Explicit read: gtest.myvalue.x=${v}`);
+        });
+
         // Try writing a value
         if (counter === 5) {
           console.log('\n✏️  Writing test values...');
-          await machine.writeVariable('::demo:test.command', counter * 10);
-          await machine.writeVariable('gtest.myvalue.x', counter * 5.5);
+          machine.writeVariable('::demo:test.command', counter * 10);
+          machine.writeVariable('gtest.myvalue.x', counter * 5.5);
           console.log('✅ Values written successfully\n');
         }
         
@@ -139,29 +160,7 @@ async function simpleDemo() {
     console.log('   • Used both task-local (::demo:) and global variables');
 
   } catch (error) {
-    console.error('\n❌ Demo failed:', error.message);
-    
-    // Provide helpful troubleshooting tips
-    if (error.message.includes('ECONNREFUSED') || error.message.includes('fetch failed')) {
-      console.log('\n💡 Connection troubleshooting:');
-      console.log('   • Ensure mapp Connect server is running');
-      console.log(`   • Verify server is accessible at ${config.host}:${config.port}`);
-      console.log('   • Check firewall settings');
-    } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-      console.log('\n💡 Authentication troubleshooting:');
-      console.log('   • Check username/password credentials');
-      console.log('   • Default mapp Connect: dev/dev');
-      console.log('   • Verify user permissions in mapp Connect configuration');
-      console.log('   • Check if OPC UA server accepts these credentials');
-    } else if (error.message.includes('404') || error.message.includes('Not Found')) {
-      console.log('\n💡 API path troubleshooting:');
-      console.log('   • Try different API paths: /opcua, /opc, /api/opcua');
-      console.log('   • Check mapp Connect OPC UA configuration');
-    } else if (error.message.includes('503') || error.message.includes('Service Unavailable')) {
-      console.log('\n💡 Service troubleshooting:');
-      console.log('   • Server is running but OPC UA service may not be enabled');
-      console.log('   • Check mapp Connect OPC UA configuration');
-    }
+    console.error('\n❌ Demo failed:', error.message);    
   } finally {
     // Clean disconnect
     console.log('\n🔌 Disconnecting...');
@@ -174,31 +173,7 @@ async function simpleDemo() {
   }
 }
 
-// Configuration guide
-function showConfigurationOptions() {
-  console.log('\n⚙️  Configuration Options:');
-  console.log('=========================');
-  console.log('');
-  console.log('For mapp Connect HTTPS (port 8443):');
-  console.log('  {');
-  console.log('    host: "localhost",');
-  console.log('    port: 8443,');
-  console.log('    protocol: "https",');
-  console.log('    username: "dev",');
-  console.log('    password: "dev",');
-  console.log('    apiBasePath: "/api/1.0"');
-  console.log('  }');
-  console.log('');
-  console.log('Variable naming conventions:');
-  console.log('  • Task-local: "::demo:variableName"');
-  console.log('  • Global: "globalVariableName"');
-  console.log('  • Namespace: Set with machine.setDefaultNamespace("ns=5;s=")');
-  console.log('');
-}
-
 // Run the demo
-console.log('🔧 Starting demo...');
-showConfigurationOptions();
 console.log('▶️ Running demo...\n');
 simpleDemo().catch((error) => {
   console.error('Demo error:', error);

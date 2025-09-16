@@ -13,16 +13,22 @@ const isBrowser = typeof window !== 'undefined';
 class WebSocketManager {
   private ws: any = null;
 
-  async create(url: string): Promise<void> {
+  async create(url: string, headers?: Record<string, string>): Promise<void> {
     if (isBrowser) {
+      // Browser WebSocket - cookies are handled automatically by the browser
       this.ws = new WebSocket(url);
     } else {
       // Dynamic import for Node.js
       try {
         const wsModule = await import('ws');
-        const { WebSocket } = wsModule.default || wsModule;
-        this.ws = new WebSocket(url);
+        // Handle both default and named exports
+        const WebSocketClass = wsModule.default || wsModule.WebSocket || wsModule;
+        
+        // Node.js WebSocket - need to explicitly pass headers including cookies
+        const options = headers ? { headers } : undefined;
+        this.ws = new WebSocketClass(url, options);
       } catch (error) {
+        console.error('WebSocket import error:', error);
         throw new Error('ws package not found. Install with: npm install ws');
       }
     }
@@ -87,11 +93,13 @@ export class OpcuaConnection {
   private messageHandlers: Array<(data: any) => void> = [];
 
   private baseUrl: string;
+  
+  // Cookie jar for Node.js (browsers handle cookies automatically)
+  private cookies: Map<string, string> = new Map();
 
   constructor(config: ConnectionConfig) {
     this.config = {
       protocol: 'http',           // Default to HTTP
-      wsProtocol: 'ws',          // Default to WS
       enableWebSocket: true,
       keepAliveInterval: 20000, // 20 seconds (2/3 of typical 30s timeout)
       ...config
@@ -209,7 +217,7 @@ export class OpcuaConnection {
     const normalizedEndpoint = endpoint.startsWith('/api/1.0') ? endpoint : `/api/1.0${endpoint}`;
     const url = `${this.baseUrl}${normalizedEndpoint}`;
     
-    const response = await fetch(url, {
+    const response = await this.fetchWithCookies(url, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -237,6 +245,69 @@ export class OpcuaConnection {
    */
   public onError(handler: ErrorHandler): void {
     this.errorHandlers.push(handler);
+  }
+
+  /**
+   * Extract and store cookies from response headers (for Node.js)
+   */
+  private extractCookies(response: Response): void {
+    if (isBrowser) return; // Browsers handle cookies automatically
+    
+    // In Node.js, response.headers.getSetCookie() returns an array of cookie strings
+    try {
+      const setCookieHeaders = (response.headers as any).getSetCookie ? 
+        (response.headers as any).getSetCookie() : 
+        [response.headers.get('set-cookie')].filter(Boolean);
+      
+      for (const cookieString of setCookieHeaders) {
+        if (cookieString) {
+          // Parse each cookie: "name=value; Path=/; HttpOnly"
+          const [nameValue] = cookieString.split(';');
+          const [name, value] = nameValue.split('=');
+          if (name && value) {
+            this.cookies.set(name.trim(), value.trim());
+            console.log(`Cookie stored: ${name.trim()}=${value.trim()}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Cookie extraction error:', error);
+    }
+  }
+
+  /**
+   * Get cookie header string for requests (for Node.js)
+   */
+  private getCookieHeader(): string {
+    if (isBrowser || this.cookies.size === 0) return '';
+    
+    const cookiePairs: string[] = [];
+    this.cookies.forEach((value, name) => {
+      cookiePairs.push(`${name}=${value}`);
+    });
+    return cookiePairs.join('; ');
+  }
+
+  /**
+   * Enhanced fetch with cookie handling
+   */
+  private async fetchWithCookies(url: string, options: RequestInit = {}): Promise<Response> {
+    // Add cookies to headers for Node.js
+    if (!isBrowser && this.cookies.size > 0) {
+      options.headers = {
+        ...options.headers,
+        'Cookie': this.getCookieHeader()
+      };
+    }
+    
+    const response = await fetch(url, options);
+    
+    // Extract cookies from response for Node.js
+    if (!isBrowser) {
+      this.extractCookies(response);
+    }
+    
+    return response;
   }
 
   /**
@@ -289,7 +360,7 @@ export class OpcuaConnection {
     try {
       console.log(`Testing endpoint: ${testUrl}`);
       
-      const response = await fetch(testUrl, {
+      const response = await this.fetchWithCookies(testUrl, {
         method: 'GET',
         mode: 'cors',
         cache: 'no-cache'
@@ -431,7 +502,7 @@ Please accept the server certificate by opening ${this.baseUrl} in your browser 
         };
       }
 
-      const authResponse = await fetch(authUrl, options);
+      const authResponse = await this.fetchWithCookies(authUrl, options);
 
       if (!authResponse.ok) {
         const errorText = await authResponse.text();
@@ -467,7 +538,7 @@ Please accept the server certificate by opening ${this.baseUrl} in your browser 
         };
       }
 
-      const sessionResponse = await fetch(sessionUrl, {
+      const sessionResponse = await this.fetchWithCookies(sessionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -619,12 +690,31 @@ Auth data: ${JSON.stringify(authData)}`);
   private async connectWebSocket(): Promise<void> {
     return new Promise(async (resolve, reject) => {
       try {
-        const wsProtocol = this.config.wsProtocol || 'ws';
+        // Automatically determine WebSocket protocol based on HTTP protocol
+        let wsProtocol: string;
+        if (this.config.wsProtocol) {
+          // Use explicitly specified WebSocket protocol
+          wsProtocol = this.config.wsProtocol;
+        } else {
+          // Auto-select: wss for https, ws for http
+          wsProtocol = this.config.protocol === 'https' ? 'wss' : 'ws';
+        }
+        
         const port = this.config.port || (this.config.protocol === 'https' ? 443 : 80);
         const wsUrl = `${wsProtocol}://${this.config.host}:${port}/api/1.0/pushchannel?sessionid=${this.sessionInfo!.sessionId}`;
         
-        console.log(`Connecting mapp Connect WebSocket to: ${wsUrl}`);
-        await this.webSocketManager.create(wsUrl);
+        console.log(`Connecting mapp Connect WebSocket to: ${wsUrl} (protocol: ${this.config.protocol} -> ${wsProtocol})`);
+        
+        // Prepare headers including cookies for Node.js WebSocket connections
+        const headers: Record<string, string> = {};
+        
+        // Add cookies for Node.js (browsers handle cookies automatically)
+        if (!isBrowser && this.cookies.size > 0) {
+          headers['Cookie'] = this.getCookieHeader();
+          console.log('WebSocket using cookies:', headers['Cookie']);
+        }
+        
+        await this.webSocketManager.create(wsUrl, Object.keys(headers).length > 0 ? headers : undefined);
         
         this.webSocketManager.setupEvents(
           () => {

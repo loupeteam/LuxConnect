@@ -172,7 +172,7 @@ window.addVariable = function() {
             log('Adding TestStruct variable...');
             machine.setDefaultNamespace('ns=5;s=');
             machine.initCyclicRead('::demo:test', (value) => {
-                log(`📊 TestStruct changed: ${JSON.stringify(value, null, 2)}`);
+                // log(`📊 TestStruct changed: ${JSON.stringify(value, null, 2)}`);
                 updateVariableDisplay('TestStruct', JSON.stringify(value, null, 2));
             });
             log('✅ TestStruct variable added to cyclic reading');
@@ -601,37 +601,37 @@ function initializeDemo() {
             // Task local variables (single colon)
             log('📍 Task local: demo:test');
             machine.initCyclicRead('demo:test', (value) => {
-                log(`  └─1 demo:test = ${JSON.stringify(value)}`);
+                // log(`  └─1 demo:test = ${JSON.stringify(value)}`);
             });
             
             // Explicit task local format
             log('📍 Explicit task local: ::demo:test');
             machine.initCyclicRead('::demo:test', (value) => {
-                log(`  └─2 ::demo:test = ${JSON.stringify(value)}`);
+                // log(`  └─2 ::demo:test = ${JSON.stringify(value)}`);
             });
 
             // Array Types
             log('📍 Arrays in task ::demo:test_arrays');
             machine.initCyclicRead('::demo:test_arrays', (value) => {
-                log(`  └─2 ::demo:test_arrays = ${JSON.stringify(value)}`);
+                // log(`  └─2 ::demo:test_arrays = ${JSON.stringify(value)}`);
             });
 
             // Global variables (no colons)
             log('🌍 Global: gtest');
             machine.initCyclicRead('gtest', (value) => {
-                log(`  └─ gtest = ${JSON.stringify(value)}`);
+                // log(`  └─ gtest = ${JSON.stringify(value)}`);
             });
             
             // Global with structure
             log('🌍 Global structure: gtest.struct1');
             machine.initCyclicRead('gtest.struct1', (value) => {
-                log(`  └─ gtest.struct1 = ${JSON.stringify(value)}`);
+                // log(`  └─ gtest.struct1 = ${JSON.stringify(value)}`);
             });
             
             // Explicit global format
             log('🌍 Explicit global: ::gtest.struct2');
             machine.initCyclicRead('::gtest.struct2', (value) => {
-                log(`  └─ ::gtest.struct2 = ${JSON.stringify(value)}`);
+                // log(`  └─ ::gtest.struct2 = ${JSON.stringify(value)}`);
             });
             
             log('✅ All variable formats registered for cyclic reading');

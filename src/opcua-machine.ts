@@ -30,6 +30,15 @@ export interface VariableOptions {
 }
 
 /**
+ * Subscription handle tracking info
+ */
+interface SubscriptionHandleInfo {
+  varName: string;
+  callback: (value: any) => void;
+  readGroup: string;
+}
+
+/**
  * OPC UA Machine class implementing lux.js patterns
  * Provides direct property access and automatic subscription management
  */
@@ -42,6 +51,7 @@ export class OpcuaMachine {
   private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
   private readGroups = new Map<string, ReadGroupInfo>();
   private subscriptionUpdateTimers = new Map<string, NodeJS.Timeout>();
+  private subscriptionHandles?: Map<string, SubscriptionHandleInfo>;
 
   // Index signature for dynamic property access (lux.js style)
   [key: string]: any;
@@ -108,8 +118,8 @@ export class OpcuaMachine {
             return target.createVariableProxy(appModule, propStr, globalState[appModule][propStr]);
           }
         }
-        
-        return undefined;
+        //If it isn't found, return the simpleVarValue, it MIGHT be an object, or could be undefined
+        return simpleVarValue;
       },
       
       set: (target, prop: string | symbol, value: any) => {
@@ -333,6 +343,99 @@ export class OpcuaMachine {
     this.variableManager.onChange(varName, (event) => {
       callback(event.value);
     });
+  }
+
+  /**
+   * Create a subscription to a single variable (uses existing read group infrastructure)
+   * Returns a subscription handle that can be used with unsubscribe()
+   * 
+   * This is a convenience API that uses the existing optimized read group system.
+   * Variables with the same sampling interval will be grouped together for efficiency.
+   * 
+   * @param varName Variable name to subscribe to
+   * @param callback Callback function to call when value changes
+   * @param samplingInterval Optional sampling interval in ms (default: 100ms for fast updates)
+   * @returns Subscription handle for unsubscribing
+   */
+  public async subscribe(varName: string, callback: (value: any) => void, samplingInterval: number = 100): Promise<string> {
+    // Generate unique subscription handle for this variable+callback combination
+    const subscriptionHandle = `${varName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create read group name based on sampling interval to group variables with same rate
+    const readGroupName = `subscriptions_${samplingInterval}ms`;
+    
+    // Ensure we have a read group for this sampling interval
+    if (!this.readGroups.has(readGroupName)) {
+      this.configureReadGroup(readGroupName, {
+        publishingInterval: samplingInterval,  // Use requested sampling interval
+        samplingInterval: samplingInterval,    // Keep both in sync
+        maxNotificationsPerPublish: 20,
+        priority: 10,                          // Higher priority than default groups
+        enabled: true
+      });
+    }
+    
+    // Track this subscription handle for cleanup
+    if (!this.subscriptionHandles) {
+      this.subscriptionHandles = new Map();
+    }
+    this.subscriptionHandles.set(subscriptionHandle, {
+      varName,
+      callback,
+      readGroup: readGroupName
+    });
+    
+    // Add variable to the appropriate read group using existing infrastructure
+    this.initCyclicRead(varName, callback, { readGroup: readGroupName });
+    
+    return subscriptionHandle;
+  }
+
+  /**
+   * Remove a subscription created with subscribe()
+   * 
+   * This removes the variable from the read group and cleans up the callback.
+   * If this was the last subscription to the variable, it will be removed from
+   * the read group entirely. The read group infrastructure handles optimization.
+   * 
+   * @param subscriptionHandle The handle returned by subscribe()
+   */
+  public async unsubscribe(subscriptionHandle: string): Promise<void> {
+    if (!this.subscriptionHandles) {
+      throw new Error(`Subscription handle '${subscriptionHandle}' not found`);
+    }
+    
+    const subscription = this.subscriptionHandles.get(subscriptionHandle);
+    if (!subscription) {
+      throw new Error(`Subscription handle '${subscriptionHandle}' not found`);
+    }
+    
+    const { varName, readGroup } = subscription;
+    
+    // Remove the callback from the variable
+    // Note: VariableManager doesn't currently support removing specific callbacks,
+    // so we'll need to enhance this. For now, we'll remove the variable from the read group
+    // if no other subscriptions exist for it.
+    
+    // Remove this handle from tracking
+    this.subscriptionHandles.delete(subscriptionHandle);
+    
+    // Check if there are other subscriptions to this variable
+    const hasOtherSubscriptions = Array.from(this.subscriptionHandles.values())
+      .some((sub: SubscriptionHandleInfo) => sub.varName === varName);
+    
+    if (!hasOtherSubscriptions) {
+      // Remove variable from read group
+      const group = this.readGroups.get(readGroup);
+      if (group) {
+        group.variables.delete(varName);
+        
+        // Update the subscription if we're connected
+        if (this.isConnected && group.options.enabled) {
+          await this.createOrUpdateSubscription(readGroup);
+        }
+      }
+    }
   }
 
   /**

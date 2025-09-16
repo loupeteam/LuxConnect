@@ -133,11 +133,15 @@ export class SubscriptionManager {
   /**
    * Add a variable to a subscription by variable name (lux.js style)
    * Handles hierarchical relationships and prevents duplicates
+   * 
+   * Note: All variables in a subscription will use the subscription's publishingInterval
+   * as their samplingInterval. If you need different sampling rates, create separate
+   * subscriptions with different intervals.
    */
   public async addVariable(
     subscriptionName: string, 
     variableName: string, 
-    _options: MonitoredItemOptions = {}
+    options: MonitoredItemOptions = {}
   ): Promise<void> {
     const subscription = this.subscriptions.get(subscriptionName);
     if (!subscription) {
@@ -152,6 +156,11 @@ export class SubscriptionManager {
     // Check if variable is already desired to avoid redundant operations
     if (subscription.desiredVariables.has(variableName)) {
       return;
+    }
+
+    // Warn if trying to override samplingInterval - it should match subscription rate
+    if (options.samplingInterval && options.samplingInterval !== subscription.parameters.publishingInterval) {
+      console.warn(`Warning: Variable '${variableName}' samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
     }
 
     // TODO: Add batch operation support for adding multiple variables at once
@@ -419,6 +428,7 @@ export class SubscriptionManager {
   ): Promise<void> {
     const clientHandle = this.clientHandleCounter++;
 
+    // Use subscription's monitoring parameters, with option overrides
     const monitoredItemParams = {
       itemToMonitor: {
         nodeId: nodeId,
@@ -426,7 +436,9 @@ export class SubscriptionManager {
       },
       monitoringParameters: {
         clientHandle: clientHandle,
-        samplingInterval: options.samplingInterval || 1000,
+        // Use subscription's publishingInterval as the default samplingInterval
+        // This ensures all variables in a subscription use the same rate
+        samplingInterval: options.samplingInterval || subscription.parameters.publishingInterval || 1000,
         queueSize: options.queueSize || 1
       },
       timestampsToReturn: 'Both',

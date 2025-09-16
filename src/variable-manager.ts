@@ -50,9 +50,32 @@ export class VariableManager {
   }
 
   /**
-   * Register a variable with format validation
+   * Register a variable with format validation and optional array parameter detection
+   * @param name Variable name
+   * @param nodeId Node ID
+   * @param readArrayParams Whether to read and store array parameters (ValueRank, ArrayDimensions)
    */
-  public registerVariable(name: string, nodeId: string): OpcuaVariable {
+  public async registerVariable(name: string, nodeId: string, readArrayParams: boolean): Promise<OpcuaVariable>;
+  
+  /**
+   * Register a variable with format validation (synchronous version for backward compatibility)
+   * @param name Variable name
+   * @param nodeId Node ID
+   */
+  public registerVariable(name: string, nodeId: string): OpcuaVariable;
+  
+  public registerVariable(name: string, nodeId: string, readArrayParams: boolean = false): OpcuaVariable | Promise<OpcuaVariable> {
+    if (readArrayParams) {
+      return this.registerVariableAsync(name, nodeId, true);
+    } else {
+      return this.registerVariableSync(name, nodeId);
+    }
+  }
+
+  /**
+   * Synchronous variable registration (original implementation)
+   */
+  private registerVariableSync(name: string, nodeId: string): OpcuaVariable {
     // Validate variable name format
     try {
       VariablePathParser.parse(name);
@@ -97,6 +120,88 @@ export class VariableManager {
       variableInfo.timestamp,
       variableInfo.quality,
       variableInfo.dataType
+    );
+
+    // Convert to OpcuaVariable format
+    const namedVariable: OpcuaVariable = {
+      name: normalizedName,
+      nodeId,
+      value: variableInfo.value,
+      timestamp: variableInfo.timestamp,
+      quality: variableInfo.quality,
+      ...(variableInfo.dataType ? { dataType: variableInfo.dataType } : {})
+    };
+
+    return namedVariable;
+  }
+
+  /**
+   * Asynchronous variable registration with array parameter reading
+   */
+  private async registerVariableAsync(name: string, nodeId: string, readArrayParams: boolean): Promise<OpcuaVariable> {
+    // Validate variable name format
+    try {
+      VariablePathParser.parse(name);
+    } catch (error) {
+      throw new Error(`Invalid variable name format '${name}': ${error}`);
+    }
+
+    // Normalize the variable name for consistent storage
+    const normalizedName = this.normalizeVariableName(name);
+
+    // Check if already registered
+    const existingVar = this.hierarchy.getVariable(normalizedName);
+    if (existingVar && existingVar.mapping.nodeId !== nodeId) {
+      throw new Error(`Variable '${name}' is already registered with different nodeId '${existingVar.mapping.nodeId}'`);
+    }
+    
+    // If variable exists with same nodeId, return existing variable
+    if (existingVar) {
+      return {
+        name: existingVar.mapping.name,
+        nodeId: existingVar.mapping.nodeId,
+        value: existingVar.value,
+        timestamp: existingVar.timestamp,
+        quality: existingVar.quality,
+        ...(existingVar.mapping.dataType && { dataType: existingVar.mapping.dataType })
+      };
+    }
+
+    // Use default values - real values will come from subscription updates
+    const variableInfo = {
+      value: undefined,
+      timestamp: new Date(),
+      quality: 'unknown' as const,
+      dataType: undefined,
+      valueRank: undefined as number | undefined,
+      arrayDimensions: undefined as Array<[number, number]> | undefined
+    };
+
+    // Optionally read array parameters
+    if (readArrayParams) {
+      try {
+        const arrayParams = await this.readArrayParameters(name);
+        variableInfo.valueRank = arrayParams.valueRank;
+        
+        // Convert simple array dimensions to OPC UA format with start/end ranges
+        if (arrayParams.arrayDimensions) {
+          variableInfo.arrayDimensions = arrayParams.arrayDimensions.map(size => [0, size - 1] as [number, number]);
+        }
+      } catch (error) {
+        console.warn(`Could not read array parameters for '${name}': ${error}`);
+      }
+    }
+    
+    // Add to hierarchy using normalized name
+    this.hierarchy.addVariable(
+      normalizedName,
+      nodeId,
+      variableInfo.value,
+      variableInfo.timestamp,
+      variableInfo.quality,
+      variableInfo.dataType,
+      variableInfo.valueRank,
+      variableInfo.arrayDimensions
     );
 
     // Convert to OpcuaVariable format
@@ -164,6 +269,72 @@ export class VariableManager {
   }
 
   /**
+   * Read a specific attribute from a node
+   * @param nodeId The node ID to read from
+   * @param attributeId The attribute ID to read (e.g., 'Value', 'ValueRank', 'ArrayDimensions', 'DataType')
+   */
+  public async readAttribute(nodeId: string, attributeId: string): Promise<any> {
+    const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/${attributeId}`, {
+      method: 'GET'
+    });
+
+    const result = await response.json();
+    
+    if (result.status?.code !== 0) {
+      throw new Error(`Failed to read attribute '${attributeId}' from node '${nodeId}': ${result.statusCode?.description || 'Unknown error'}`);
+    }
+
+    return result.value;
+  }
+
+  /**
+   * Read array parameters for a variable (ValueRank and ArrayDimensions)
+   * Returns information about array structure
+   */
+  public async readArrayParameters(name: string): Promise<{
+    valueRank: number;
+    arrayDimensions: number[] | null;
+    isArray: boolean;
+    dimensionCount: number;
+  }> {
+    const normalizedName = this.normalizeVariableName(name);
+    
+    // Get or build nodeId
+    let targetNodeId: string;
+    const varData = this.hierarchy.getVariable(normalizedName);
+    if (varData) {
+      targetNodeId = varData.mapping.nodeId;
+    } else {
+      targetNodeId = this.buildNodeId(name);
+    }
+
+    try {
+      // Read ValueRank (-1 = scalar, 0 = 1D array, 1 = 2D array, etc.)
+      const valueRank = await this.readAttribute(targetNodeId, 'ValueRank');
+      
+      // Read ArrayDimensions (only meaningful for arrays)
+      let arrayDimensions: number[] | null = null;
+      if (valueRank >= 0) {
+        try {
+          arrayDimensions = await this.readAttribute(targetNodeId, 'ArrayDimensions');
+        } catch (error) {
+          // ArrayDimensions might not be available for some nodes
+          console.warn(`Could not read ArrayDimensions for '${name}': ${error}`);
+        }
+      }
+
+      return {
+        valueRank,
+        arrayDimensions,
+        isArray: valueRank >= 0,
+        dimensionCount: valueRank >= 0 ? (arrayDimensions?.length || 1) : 0
+      };
+    } catch (error) {
+      throw new Error(`Failed to read array parameters for variable '${name}': ${error}`);
+    }
+  }
+
+  /**
    * Read the current value of a variable by name
    * No registration required - builds NodeId dynamically
    */
@@ -194,9 +365,8 @@ export class VariableManager {
     const quality = this.mapQualityCode(result.status?.code || 0);
 
     // If variable is registered, update hierarchy and emit change events
-    if (varData) {
-      const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
-      
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
+    if (varData) {  
       // Emit change events for all affected variables
       for (const affectedName of affectedVariables) {
         const affectedData = this.hierarchy.getVariable(affectedName);
