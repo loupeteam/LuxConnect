@@ -177,6 +177,22 @@ export class OpcuaMachine {
   }
 
   /**
+   * Change the logged-in user for the current session
+   * @param username New username (or undefined for anonymous)
+   * @param password New password (optional)
+   */
+  public async changeUser(username?: string, password?: string): Promise<void> {
+    await this.connection.changeUser(username, password);
+  }
+
+  /**
+   * Get current session information including username and roles
+   */
+  public getSessionInfo() {
+    return this.connection.getSessionInfo();
+  }
+
+  /**
    * Check if currently connected
    */
   public get isConnected(): boolean {

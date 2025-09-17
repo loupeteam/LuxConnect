@@ -63,10 +63,10 @@ export class VariableManager {
   }
 
   /**
-   * Create a smart promise that handles errors according to the error policy
-   * In 'default' mode: logs errors and returns cached values, doesn't crash
-   * In 'strict' mode: rejects normally (will crash if unhandled)
-   * In 'silent' mode: returns cached values without logging
+   * Creates a smart promise that handles errors based on the error policy
+   * - strict: Returns promise as-is (will crash if unhandled)
+   * - default: Logs errors and returns cached/fallback values
+   * - silent: Returns cached/fallback values without logging
    */
   private createSmartPromise<T>(
     operation: () => Promise<T>,
@@ -89,7 +89,7 @@ export class VariableManager {
       if (this.errorPolicy === 'default') {
         // Log the error in default mode
         const errorMsg = error?.message || String(error);
-        console.warn(`🔄 Read failed for '${variableName}': ${errorMsg} (returning cached value: ${cachedValue})`);
+        console.warn(`🔄 Operation failed for '${variableName}': ${errorMsg} (using cached/fallback value)`);
       }
       
       return cachedValue as T;

@@ -50,7 +50,7 @@ describe('Error Handling System', () => {
       
       expect(result).toBeUndefined();
       expect(consoleSpy).toHaveBeenCalled();
-      expect(consoleSpy.mock.calls[0][0]).toContain('🔄 Read failed for \'TestVar\'');
+      expect(consoleSpy.mock.calls[0][0]).toContain(`🔄 Operation failed for 'TestVar': Connection failed (using cached/fallback value)`);
 
       consoleSpy.mockRestore();
     });
@@ -65,7 +65,7 @@ describe('Error Handling System', () => {
       
       expect(result).toBeUndefined();
       expect(consoleSpy).toHaveBeenCalled();
-      expect(consoleSpy.mock.calls[0][0]).toContain('🔄 Read failed for \'TestVar\'');
+      expect(consoleSpy.mock.calls[0][0]).toContain(`🔄 Operation failed for 'TestVar': Write failed (using cached/fallback value)`);
 
       consoleSpy.mockRestore();
     });

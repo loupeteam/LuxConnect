@@ -307,6 +307,87 @@ export class OpcuaConnection {
   }
 
   /**
+   * Change user identity for the current session
+   * @param username New username (or undefined for anonymous)
+   * @param password New password (optional)
+   */
+  public async changeUser(username?: string, password?: string): Promise<void> {
+    if (!this.sessionInfo) {
+      return rejectWithError(
+        LuxConnectErrorCode.NOT_CONNECTED,
+        'Not connected to OPC UA server. Call connect() first.'
+      );
+    }
+
+    const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}`;
+    
+    // Prepare user identity token
+    let userIdentityToken: any;
+    if (username) {
+      userIdentityToken = {
+        username,
+        password: password || ''
+      };
+    } else {
+      // Anonymous user
+      userIdentityToken = {};
+    }
+
+    console.log(`Changing user for session ${this.sessionInfo.sessionId} to: ${username || 'anonymous'}`);
+
+    try {
+      const response = await this.fetchWithCookies(sessionUrl, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userIdentityToken
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return rejectWithError(
+          LuxConnectErrorCode.AUTHENTICATION_FAILED,
+          `Failed to change user: ${response.status} ${response.statusText} - ${errorText}`,
+          { status: response.status, statusText: response.statusText }
+        );
+      }
+
+      const responseData = await response.json();
+      
+      // Check if the change was successful
+      if (responseData.statusCode && responseData.statusCode !== 0) {
+        return rejectWithError(
+          LuxConnectErrorCode.AUTHENTICATION_FAILED,
+          `User change failed: ${responseData.statusCode} - ${responseData.description || 'Unknown error'}`,
+          responseData
+        );
+      }
+
+      // Update session info with new user details
+      this.sessionInfo.username = username || 'anonymous';
+      
+      // Note: We don't update roles here as they're not returned in the PATCH response
+      // The roles would be updated on the next authenticated request or could be fetched separately
+      
+      console.log(`✅ Successfully changed user to: ${this.sessionInfo.username}`);
+
+      // Emit connection state change to notify subscriptions may need to be re-established
+      // (as mentioned in the API docs, changing user may cause subscription discontinuities)
+      this.setState(this.state);
+
+    } catch (error) {
+      return rejectWithError(
+        LuxConnectErrorCode.AUTHENTICATION_FAILED,
+        `Failed to change user: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
+  }
+
+  /**
    * Get the WebSocket manager for subscriptions
    */
   public getWebSocket(): WebSocketManager {

@@ -60,6 +60,35 @@ await machine.writeVariable('gTemperature', 30.0);
 machine.onChange('gTemperature', (value) => {
   console.log(`Temperature changed: ${value}°C`);
 });
+
+### User Management
+
+Change the logged-in user during an active session without disconnecting:
+
+```typescript
+// Check current session info
+let sessionInfo = machine.getSessionInfo();
+console.log('Current user:', sessionInfo?.username);
+console.log('User roles:', sessionInfo?.roles);
+
+// Change to a different user
+await machine.changeUser('operator', 'operator123');
+
+// Check the new session info
+sessionInfo = machine.getSessionInfo();
+console.log('New user:', sessionInfo?.username);
+
+// Change to anonymous user
+await machine.changeUser(); // No parameters = anonymous
+
+// Switch back to admin
+await machine.changeUser('admin', 'admin123');
+```
+
+**Important Notes:**
+- Changing users may cause discontinuities in active subscriptions
+- The new user's permissions will apply to subsequent operations
+- Session remains active - no reconnection required
 ```
 
 ## 📚 Detailed Usage
@@ -89,42 +118,157 @@ const machine = new OpcuaMachine({
 
 ### Error Handling Policies
 
-LuxConnect offers three error handling modes:
+LuxConnect provides three distinct error handling modes designed for different application needs. The key architectural decision is that **in non-strict modes, `.catch()` handlers are NOT called** - instead, operations resolve with cached/fallback values to prevent crashes.
 
-#### 1. Default Policy (Recommended)
-**Crash-resistant** - Operations never throw, return cached values on errors:
+#### 1. Default Policy (Recommended) 
+**🛡️ Crash-resistant with logging** - Operations never throw, return cached values on errors:
 
 ```typescript
 machine.setErrorPolicy('default');
 
 // These operations will NEVER crash your application
-const temp = await machine.readVariable('Temperature');  // Returns cached value on error
-machine.writeVariable('Pressure', 100);                  // Logs error, continues execution
+const temp = await machine.readVariable('Temperature');  // Returns cached value or undefined on error
+await machine.writeVariable('Pressure', 100);            // Logs warning, returns undefined on error
+
+// ❌ .catch() handlers are NOT called (promises always resolve)
+machine.readVariable('BadVariable')
+  .then(value => console.log('Got:', value))   // ✅ Always called (with cached/undefined)
+  .catch(error => console.log('Error:', error)); // ❌ Never called in default mode
+
+// ✅ Check console for warning messages:
+// "🔄 Operation failed for 'BadVariable': Connection failed (using cached/fallback value)"
 ```
 
 #### 2. Strict Policy
-**Exception-based** - Throws errors for explicit handling:
+**⚠️ Exception-based** - Throws errors, NO cached values returned:
 
 ```typescript
 machine.setErrorPolicy('strict');
 
+// Operations throw errors - you MUST handle them
 try {
   const temp = await machine.readVariable('Temperature');
+  console.log('Success:', temp);
 } catch (error) {
-  if (error.isConnectionError()) {
-    console.log('Connection problem, will retry...');
-  }
+  console.log('Failed:', error.message);
+  // ❌ temp is undefined here - NO cached value is provided in strict mode
+  // You must handle the failure explicitly
 }
+
+// ✅ .catch() handlers ARE called in strict mode
+machine.readVariable('BadVariable')
+  .then(value => console.log('Got:', value))    // ✅ Called on success only
+  .catch(error => console.log('Error:', error)); // ✅ Called on failure, no cached value
+
+// ⚠️ Unhandled rejections will crash Node.js applications!
+// ⚠️ No fallback values - operations either succeed or fail completely
 ```
 
 #### 3. Silent Policy
-**Fail silently** - No errors thrown, no logging:
+**🤫 Fail silently** - No errors thrown, no logging:
 
 ```typescript
 machine.setErrorPolicy('silent');
 
 // Operations fail silently, return cached values
-const temp = await machine.readVariable('Temperature');  // undefined on error, no logging
+const temp = await machine.readVariable('Temperature');  // undefined on error, no console output
+
+// ❌ .catch() handlers are NOT called (promises always resolve)
+// ❌ No warning messages in console
+```
+
+#### Error Policy Comparison
+
+| Policy | Throws Errors | Calls `.catch()` | Console Logging | Returns Cached Values | Best For |
+|--------|---------------|------------------|-----------------|-------------------|----------|
+| `default` | ❌ No | ❌ No | ✅ Warnings | ✅ Yes | Production apps, UI applications |
+| `strict` | ✅ Yes | ✅ Yes | ❌ No | ❌ No | Testing, critical systems |  
+| `silent` | ❌ No | ❌ No | ❌ No | ✅ Yes | Background services, monitoring |
+
+#### Important: `.catch()` Behavior
+
+**Key Point**: In `default` and `silent` modes, promises always resolve (never reject), so `.catch()` handlers are never executed:
+
+```typescript
+machine.setErrorPolicy('default');
+
+// This pattern won't work as expected in default/silent mode:
+machine.readVariable('nonexistent')
+  .then(value => {
+    if (value !== undefined) {
+      updateUI(value);
+    } else {
+      showError('No data available'); // ✅ Use this pattern instead
+    }
+  })
+  .catch(error => {
+    showError(error.message); // ❌ This will NEVER execute
+  });
+
+// Better pattern for default/silent mode:
+const value = await machine.readVariable('sensor');
+if (value !== undefined) {
+  updateUI(value);
+} else {
+  showError('Sensor offline - using last known value');
+}
+```
+
+#### Error Handling Best Practices
+
+**For Production Applications (Recommended):**
+```typescript
+machine.setErrorPolicy('default');
+
+// UI updates with graceful degradation
+const sensorData = await machine.readVariable('sensor.temperature');
+if (sensorData !== undefined) {
+  displayTemperature(sensorData);
+} else {
+  displayTemperature('--', { offline: true });
+}
+```
+
+**For Critical Systems:**
+```typescript
+machine.setErrorPolicy('strict');
+
+try {
+  await machine.writeVariable('safety.emergency_stop', true);
+  console.log('Emergency stop activated');
+} catch (error) {
+  // Critical error - no cached value available, must handle explicitly
+  console.error(`Safety write failed: ${error.message}`);
+  await activateBackupSafetySystem();
+  throw new Error(`Safety system failed: ${error.message}`);
+}
+
+// Reading critical values - handle failures explicitly
+try {
+  const safetyStatus = await machine.readVariable('safety.system_ok');
+  if (safetyStatus) {
+    continueOperation();
+  }
+} catch (error) {
+  // No cached value - we genuinely don't know the safety status
+  await emergencyShutdown();
+  throw new Error(`Cannot verify safety status: ${error.message}`);
+}
+```
+
+**For Background Monitoring:**
+```typescript
+machine.setErrorPolicy('silent');
+
+// Collect data without console spam
+const metrics = await Promise.all([
+  machine.readVariable('cpu.usage'),
+  machine.readVariable('memory.usage'),  
+  machine.readVariable('network.status')
+]);
+
+// Filter out undefined values (failed reads)
+const validMetrics = metrics.filter(m => m !== undefined);
 ```
 
 ### Variable Management
@@ -597,6 +741,8 @@ The following features are documented above but not yet fully implemented:
 Main interface for OPC UA operations
 - `connect()` - Establish connection
 - `disconnect()` - Close connection  
+- `changeUser(username?, password?)` - Change logged-in user for session
+- `getSessionInfo()` - Get current session information
 - `readVariable(name)` - Read single variable
 - `writeVariable(name, value)` - Write single variable
 - `initCyclicRead(name, callback?, options?)` - Start subscription monitoring
