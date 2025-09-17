@@ -222,18 +222,36 @@ export class SubscriptionManager {
     const toAdd = Array.from(consolidatedNodeIds).filter(nodeId => !subscription.actualNodeIds.has(nodeId));
     const toRemove = Array.from(subscription.actualNodeIds).filter(nodeId => !consolidatedNodeIds.has(nodeId));
 
-    // Remove obsolete monitored items
-    for (const nodeId of toRemove) {
-      await this.removeMonitoredItemByNodeId(subscription, nodeId);
-      subscription.actualNodeIds.delete(nodeId);
+    // Use batch operations for efficiency when dealing with multiple items
+    if (toRemove.length > 1) {
+      // Batch remove multiple monitored items
+      await this.removeMultipleMonitoredItems(subscription, toRemove);
+    } else {
+      // Remove obsolete monitored items individually
+      for (const nodeId of toRemove) {
+        await this.removeMonitoredItemByNodeId(subscription, nodeId);
+        subscription.actualNodeIds.delete(nodeId);
+      }
     }
 
-    // Add new monitored items
-    for (const nodeId of toAdd) {
-      // Find the variable name for this nodeId
-      const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
-      await this.addMonitoredItem(subscription, nodeId, {}, varName);
-      subscription.actualNodeIds.add(nodeId);
+    if (toAdd.length > 1) {
+      // Batch add multiple monitored items
+      const batchItems = toAdd.map(nodeId => {
+        const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
+        return {
+          nodeId: nodeId,
+          ...(varName && { variableName: varName }),
+          options: {} as MonitoredItemOptions
+        };
+      });
+      await this.addMultipleMonitoredItems(subscription, batchItems);
+    } else {
+      // Add new monitored items individually
+      for (const nodeId of toAdd) {
+        // Find the variable name for this nodeId
+        const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
+        await this.addMonitoredItem(subscription, nodeId, {}, varName);
+      }
     }
   }
 
@@ -452,8 +470,15 @@ export class SubscriptionManager {
         
         // Create the subscription
         await this.createSubscription(config.name, config.parameters);
+        const subscription = this.subscriptions.get(config.name);
         
-        // Add all variables back to the subscription
+        if (!subscription) {
+          console.error(`Failed to find recreated subscription: ${config.name}`);
+          continue;
+        }
+        
+        // Use individual operations for variable re-addition
+        // (Batch operations would require complex nodeId resolution that's already handled in addVariable)
         for (const variableName of config.variables) {
           try {
             await this.addVariable(config.name, variableName);
@@ -537,6 +562,114 @@ export class SubscriptionManager {
   }
 
   /**
+   * Add multiple monitored items to a subscription in a batch operation
+   */
+  private async addMultipleMonitoredItems(
+    subscription: SubscriptionInfo,
+    items: Array<{ nodeId: string; options?: MonitoredItemOptions; variableName?: string }>
+  ): Promise<void> {
+    if (items.length === 0) return;
+    
+    console.log(`Adding ${items.length} monitored items in batch...`);
+    
+    // Prepare batch request
+    const monitoredItemsParams = items.map(item => {
+      const clientHandle = this.clientHandleCounter++;
+      return {
+        itemToMonitor: {
+          nodeId: item.nodeId,
+          attribute: 'Value'
+        },
+        monitoringParameters: {
+          clientHandle: clientHandle,
+          samplingInterval: item.options?.samplingInterval || subscription.parameters.publishingInterval || 1000,
+          queueSize: item.options?.queueSize || 1
+        },
+        timestampsToReturn: 'Both',
+        monitoringMode: 'Reporting',
+        // Store metadata for result processing
+        _metadata: {
+          nodeId: item.nodeId,
+          variableName: item.variableName,
+          clientHandle: clientHandle
+        }
+      };
+    });
+
+    try {
+      // Try batch operation first using the correct mapp Connect batch format
+      const batchRequests = monitoredItemsParams.map((param, index) => ({
+        id: `add-${index}`,
+        method: 'POST',
+        url: `/`,  // Relative URL within the monitoredItems context
+        body: {
+          itemToMonitor: {
+            nodeId: param.itemToMonitor.nodeId,
+            attribute: param.itemToMonitor.attribute
+          },
+          monitoringParameters: {
+            samplingInterval: param.monitoringParameters.samplingInterval,
+            queueSize: param.monitoringParameters.queueSize,
+            clientHandle: param.monitoringParameters.clientHandle
+          },
+          timestampsToReturn: param.timestampsToReturn,
+          monitoringMode: param.monitoringMode
+        },
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }));
+
+      const response = await this.connection.apiRequest(
+        `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/$batch`, 
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            requests: batchRequests
+          })
+        }
+      );
+
+      const results = await response.json();
+      
+      if (results.responses && Array.isArray(results.responses)) {
+        // Process batch results
+        for (let i = 0; i < results.responses.length; i++) {
+          const response = results.responses[i];
+          const originalItem = monitoredItemsParams[i];
+          
+          if (response.body && response.body.monitoredItemId) {
+            const monitoredItemInfo: MonitoredItemInfo = {
+              monitoredItemId: response.body.monitoredItemId,
+              clientHandle: originalItem._metadata.clientHandle,
+              nodeId: originalItem._metadata.nodeId,
+              ...(originalItem._metadata.variableName && { variableName: originalItem._metadata.variableName })
+            };
+
+            subscription.monitoredItems.set(response.body.monitoredItemId, monitoredItemInfo);
+            subscription.actualNodeIds.add(originalItem._metadata.nodeId);
+            this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
+          } else {
+            console.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
+          }
+        }
+        console.log(`✅ Batch add completed: ${results.responses.length} items processed`);
+      }
+    } catch (batchError) {
+      // Fallback to individual operations if batch is not supported
+      console.log('Batch operation not supported, falling back to individual operations...');
+      
+      for (const item of items) {
+        try {
+          await this.addMonitoredItem(subscription, item.nodeId, item.options || {}, item.variableName);
+        } catch (error) {
+          console.warn(`Failed to add monitored item ${item.nodeId}:`, error);
+        }
+      }
+    }
+  }
+
+  /**
    * Remove a monitored item from a subscription
    */
   private async removeMonitoredItem(subscription: SubscriptionInfo, nodeId: string): Promise<void> {
@@ -567,6 +700,81 @@ export class SubscriptionManager {
     // Remove from local maps
     subscription.monitoredItems.delete(monitoredItemId);
     this.clientHandleMap.delete(clientHandle);
+  }
+
+  /**
+   * Remove multiple monitored items from a subscription in a batch operation
+   */
+  private async removeMultipleMonitoredItems(
+    subscription: SubscriptionInfo,
+    nodeIds: string[]
+  ): Promise<void> {
+    if (nodeIds.length === 0) return;
+    
+    console.log(`Removing ${nodeIds.length} monitored items in batch...`);
+    
+    // Find monitored item IDs for the given node IDs
+    const itemsToRemove: Array<{ monitoredItemId: number; clientHandle: number; nodeId: string }> = [];
+    
+    for (const nodeId of nodeIds) {
+      for (const [itemId, item] of subscription.monitoredItems) {
+        if (item.nodeId === nodeId) {
+          itemsToRemove.push({
+            monitoredItemId: itemId,
+            clientHandle: item.clientHandle,
+            nodeId: nodeId
+          });
+          break;
+        }
+      }
+    }
+    
+    if (itemsToRemove.length === 0) {
+      console.warn('No monitored items found for the given node IDs');
+      return;
+    }
+
+    try {
+      // Try batch delete operation using the correct mapp Connect batch format
+      const batchRequests = itemsToRemove.map((item, index) => ({
+        id: index,
+        method: 'DELETE',
+        url: `/${item.monitoredItemId}`,  // Relative URL for the specific monitored item
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }));
+
+      await this.connection.apiRequest(
+        `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/$batch`, 
+        {
+          method: 'POST',  // Batch operations are always POST
+          body: JSON.stringify({
+            requests: batchRequests
+          })
+        }
+      );
+
+      // Clean up local state
+      for (const item of itemsToRemove) {
+        subscription.monitoredItems.delete(item.monitoredItemId);
+        subscription.actualNodeIds.delete(item.nodeId);
+        this.clientHandleMap.delete(item.clientHandle);
+      }
+      
+      console.log(`✅ Batch remove completed: ${itemsToRemove.length} items removed`);
+    } catch (batchError) {
+      // Fallback to individual operations if batch is not supported
+      console.log('Batch delete not supported, falling back to individual operations...');
+      
+      for (const nodeId of nodeIds) {
+        try {
+          await this.removeMonitoredItem(subscription, nodeId);
+        } catch (error) {
+          console.warn(`Failed to remove monitored item ${nodeId}:`, error);
+        }
+      }
+    }
   }
 
   /**
