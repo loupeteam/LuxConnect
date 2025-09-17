@@ -385,8 +385,8 @@ export class VariableHierarchy {
     this.variables.set(name, mapping);
     this.nodeIdToName.set(nodeId, name);
     
-    // Update global state
-    this.globalState = this.setValueAtPath(this.globalState, statePath, value);
+    // Update global state directly
+    this.setValueAtPath(this.globalState, statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
     
     return mapping;
@@ -404,8 +404,8 @@ export class VariableHierarchy {
       return [name]; // Return just this variable as affected
     }
 
-    // Update global state
-    this.globalState = this.setValueAtPath(this.globalState, mapping.statePath, value);
+    // Update global state directly
+    this.setValueAtPath(this.globalState, mapping.statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
     
     // Find all variables that might be affected by this change
@@ -613,19 +613,19 @@ export class VariableHierarchy {
   }
 
   /**
-   * Set value at a specific path in an object (returns new object)
+   * Set value at a specific path in an object (mutates the object directly for performance)
    */
-  private setValueAtPath(obj: any, path: string[], value: any): any {
-    if (path.length === 0) return value;
+  private setValueAtPath(obj: any, path: string[], value: any): void {
+    if (path.length === 0) {
+      // Cannot set root object directly
+      throw new Error('Cannot set value at empty path');
+    }
     
-    // Deep clone the object
-    const newObj = this.deepClone(obj);
-    
-    // Navigate to the target location
-    let current = newObj;
+    // Navigate to the target location, creating intermediate objects as needed
+    let current = obj;
     for (let i = 0; i < path.length - 1; i++) {
       let isArray = false;
-      if(path.length > i + 1){
+      if (path.length > i + 1) {
         const nextSegment = path[i + 1];
         isArray = this.isArrayIndex(nextSegment);
       }
@@ -633,11 +633,9 @@ export class VariableHierarchy {
       current = this.ensurePathSegment(current, segment, isArray);
     }
     
-    // Set the final value
+    // Set the final value directly
     const finalSegment = path[path.length - 1];
     this.setPathSegmentValue(current, finalSegment, value);
-    
-    return newObj;
   }
 
   /**
@@ -766,8 +764,115 @@ export class VariableHierarchy {
       }
     } else {
       // Handle regular object properties
-      current[segment] = value;
+      if (this.shouldMergeObjects(current[segment], value)) {
+        // Perform deep merge instead of replacement
+        current[segment] = this.deepMerge(current[segment], value);
+      } else {
+        // Replace for non-objects or when current doesn't exist
+        current[segment] = value;
+      }
     }
+  }
+
+  /**
+   * Check if two values should be merged (both are mergeable objects or arrays)
+   */
+  private shouldMergeObjects(existing: any, newValue: any): boolean {
+    return existing != null &&
+           newValue != null &&
+           this.isMergeable(existing) &&
+           this.isMergeable(newValue) &&
+           (this.isPlainObject(existing) === this.isPlainObject(newValue)); // Both objects or both arrays
+  }
+
+  /**
+   * Check if a value is mergeable (plain object or array)
+   */
+  private isMergeable(value: any): boolean {
+    return this.isPlainObject(value) || Array.isArray(value);
+  }
+
+  /**
+   * Check if a value is a plain object (not array, date, or other special types)
+   */
+  private isPlainObject(value: any): boolean {
+    return value != null &&
+           typeof value === 'object' &&
+           !Array.isArray(value) &&
+           !(value instanceof Date) &&
+           value.constructor === Object;
+  }
+
+  /**
+   * Deep merge two objects or arrays, with newObj properties overriding existing ones
+   */
+  private deepMerge(existing: any, newObj: any): any {
+    // Handle array merging by index
+    if (Array.isArray(existing) && Array.isArray(newObj)) {
+      return this.mergeArraysByIndex(existing, newObj);
+    }
+
+    // Handle object merging
+    if (this.isPlainObject(existing) && this.isPlainObject(newObj)) {
+      return this.mergeObjects(existing, newObj);
+    }
+
+    // Fallback: replace entirely
+    return newObj;
+  }
+
+  /**
+   * Merge arrays by index, preserving existing elements not overridden by new array
+   */
+  private mergeArraysByIndex(existingArray: any[], newArray: any[]): any[] {
+    // Start with a copy of the existing array
+    const result = [...existingArray];
+
+    // Override/extend with new array values
+    for (let i = 0; i < newArray.length; i++) {
+      const newValue = newArray[i];
+      
+      // Skip undefined values (preserve existing)
+      if (newValue === undefined) {
+        continue;
+      }
+      
+      const existingValue = result[i];
+
+      if (this.shouldMergeObjects(existingValue, newValue)) {
+        // Recursively merge nested objects/arrays
+        result[i] = this.deepMerge(existingValue, newValue);
+      } else {
+        // Replace with new value (primitives, null, different types, etc.)
+        result[i] = newValue;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Merge plain objects, with new properties overriding existing ones
+   */
+  private mergeObjects(existingObj: any, newObj: any): any {
+    const result = { ...existingObj };
+
+    for (const key in newObj) {
+      if (newObj.hasOwnProperty(key)) {
+        const newValue = newObj[key];
+        const existingValue = result[key];
+
+        if (this.shouldMergeObjects(existingValue, newValue)) {
+          // Recursively merge nested objects/arrays
+          result[key] = this.deepMerge(existingValue, newValue);
+        } else {
+          // Replace with new value (primitives, arrays, null, etc.)
+          result[key] = newValue;
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
