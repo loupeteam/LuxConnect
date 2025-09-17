@@ -500,25 +500,24 @@ describe('VariableHierarchy (Cross-Platform)', () => {
     });
   });
 
-  describe('deep cloning and immutability', () => {
-    it('should return deep cloned global state', () => {
+  describe('performance optimizations', () => {
+    it('should return direct reference to global state for performance', () => {
       const originalObject = { nested: { value: 'original' } };
       hierarchy.addVariable('TestObj', 'ns=1;s=TestObj', originalObject, mockDate, 'good');
       
       const globalState1 = hierarchy.getGlobalState();
       const globalState2 = hierarchy.getGlobalState();
       
-      // Should be different objects (deep cloned)
-      expect(globalState1).not.toBe(globalState2);
-      expect(globalState1._default.AsGlobalPV.TestObj).not.toBe(globalState2._default.AsGlobalPV.TestObj);
+      // Should be same objects (direct reference for performance)
+      expect(globalState1).toBe(globalState2);
+      expect(globalState1._default.AsGlobalPV.TestObj).toBe(globalState2._default.AsGlobalPV.TestObj);
       
-      // But should have same content
+      // Should have same content
       expect(globalState1).toEqual(globalState2);
       
-      // Modifying returned state should not affect internal state
-      globalState1._default.AsGlobalPV.TestObj.nested.value = 'modified';
-      const globalState3 = hierarchy.getGlobalState();
-      expect(globalState3._default.AsGlobalPV.TestObj.nested.value).toBe('original');
+      // NOTE: For performance, developers are trusted not to modify the returned state
+      // If they do modify it, it will affect the internal state (this is by design)
+      expect(globalState1._default.AsGlobalPV.TestObj.nested.value).toBe('original');
     });
 
     it('should maintain internal state immutability during updates', () => {
@@ -559,7 +558,7 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       const retrieveTime = Date.now() - retrieveStart;
       
       expect(allVars.size).toBe(variableCount);
-      expect(addTime).toBeLessThan(1000); // Should complete within 1 second
+      expect(addTime).toBeLessThan(10); // Should complete within 10 ms (more reasonable)
       expect(retrieveTime).toBeLessThan(100); // Retrieval should be fast
     });
 

@@ -488,11 +488,15 @@ export class VariableHierarchy {
     return related;
   }
 
+
   /**
-   * Get the current global state (for debugging)
+   * Get a reference to the global state object
+   * WARNING: The returned object should be treated as read-only.
+   * Modifying it directly will bypass validation and notification systems.
+   * Use updateVariable() or writeVariable() methods to make changes.
    */
   getGlobalState(): any {
-    return this.deepClone(this.globalState);
+    return this.globalState;
   }
 
   /**
