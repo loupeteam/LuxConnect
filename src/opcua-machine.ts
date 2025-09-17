@@ -130,6 +130,8 @@ export class OpcuaMachine {
           return true;
         }
         
+        //TODO: This probably doesn't work for most variables since it doesn't handle scopes or tasks
+        // Remove?
         // If it's a variable name, write it via VariableManager
         if (typeof value !== 'function') {
           target.writeVariable(prop.toString(), value).catch(console.error);
