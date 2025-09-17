@@ -5,9 +5,24 @@ import {
   ConnectionStateHandler, 
   ErrorHandler 
 } from './types.js';
+import { LuxConnectErrorCode, rejectWithError } from './errors.js';
 
 // Check if we're in a browser environment
 const isBrowser = typeof window !== 'undefined';
+
+// Add global error handling for unhandled WebSocket errors in Node.js
+if (!isBrowser) {
+  // Catch unhandled error events that might crash the process
+  process.on('uncaughtException', (error) => {
+    if (error.message && error.message.includes('WebSocket was closed before the connection was established')) {
+      console.debug('Caught and handled WebSocket establishment error:', error.message);
+      // Don't crash the process for this specific error
+      return;
+    }
+    // Re-throw other uncaught exceptions
+    throw error;
+  });
+}
 
 // Platform-specific WebSocket handling
 class WebSocketManager {
@@ -16,7 +31,12 @@ class WebSocketManager {
 
   async create(url: string, headers?: Record<string, string>): Promise<void> {
     // Always close existing WebSocket first to prevent old connections from reconnecting
-    this.close();
+    try {
+      this.close();
+    } catch (error) {
+      // Ignore close errors when creating new connection
+      console.debug('Error closing existing WebSocket during create (ignored):', error);
+    }
     
     if (isBrowser) {
       // Browser WebSocket - cookies are handled automatically by the browser
@@ -31,6 +51,13 @@ class WebSocketManager {
         // Node.js WebSocket - need to explicitly pass headers including cookies
         const options = headers ? { headers } : undefined;
         this.ws = new WebSocketClass(url, options);
+        
+        // Add critical error event handler immediately to prevent crashes
+        this.ws.on('error', (error: any) => {
+          console.debug('WebSocket error during creation (handled):', error);
+          // Don't let this crash the process - the setupEvents will handle it properly
+        });
+        
       } catch (error) {
         console.error('WebSocket import error:', error);
         throw new Error('ws package not found. Install with: npm install ws');
@@ -58,7 +85,9 @@ class WebSocketManager {
       };
       this.ws.onmessage = (event: MessageEvent) => onMessage(event.data);
     } else {
-      // Node.js ws package API
+      // Node.js ws package API - remove any existing listeners first
+      this.ws.removeAllListeners();
+      
       this.ws.on('open', onOpen);
       this.ws.on('error', onError);
       this.ws.on('close', (code: number, reason: string) => {
@@ -81,23 +110,40 @@ class WebSocketManager {
     if (this.ws) {
       this.isClosingProgrammatically = true;
       
-      // Remove event listeners first to prevent unwanted reconnection attempts
-      if (isBrowser) {
-        this.ws.onopen = null;
-        this.ws.onerror = null;
-        this.ws.onclose = null;
-        this.ws.onmessage = null;
-      } else {
-        this.ws.removeAllListeners();
+      try {
+        // Remove event listeners first to prevent unwanted reconnection attempts
+        if (isBrowser) {
+          this.ws.onopen = null;
+          this.ws.onerror = null;
+          this.ws.onclose = null;
+          this.ws.onmessage = null;
+        } else {
+          this.ws.removeAllListeners();
+        }
+        
+        // Close the connection only if it's in a state that allows closing
+        const readyState = this.ws.readyState;
+        if (readyState === (this.ws.OPEN || 1) || 
+            readyState === (this.ws.CONNECTING || 0)) {
+          this.ws.close(1000, 'Connection closed programmatically'); // Normal closure
+        }
+        
+        // For Node.js, wait a brief moment for the close to process
+        if (!isBrowser) {
+          // Give it a moment to close cleanly before nullifying
+          setTimeout(() => {
+            this.ws = null;
+          }, 50);
+        } else {
+          this.ws = null;
+        }
+        
+      } catch (error) {
+        // Ignore close errors - we're trying to clean up anyway
+        console.debug('WebSocket close error (ignored):', error);
+        this.ws = null;
       }
       
-      // Close the connection
-      if (this.ws.readyState === (this.ws.OPEN || 1) || 
-          this.ws.readyState === (this.ws.CONNECTING || 0)) {
-        this.ws.close(1000, 'Connection closed programmatically'); // Normal closure
-      }
-      
-      this.ws = null;
       this.isClosingProgrammatically = false;
     }
   }
@@ -272,27 +318,43 @@ export class OpcuaConnection {
    */
   public async apiRequest(endpoint: string, options: RequestInit = {}): Promise<Response> {
     if (!this.sessionInfo) {
-      throw new Error('Not connected to OPC UA server');
+      return rejectWithError(
+        LuxConnectErrorCode.NOT_CONNECTED,
+        'Not connected to OPC UA server. Call connect() first.'
+      );
     }
 
     // Ensure endpoint starts with /api/1.0 for mapp Connect
     const normalizedEndpoint = endpoint.startsWith('/api/1.0') ? endpoint : `/api/1.0${endpoint}`;
     const url = `${this.baseUrl}${normalizedEndpoint}`;
     
-    const response = await this.fetchWithCookies(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.sessionInfo.sessionId}`,
-        ...options.headers
+    try {
+      const response = await this.fetchWithCookies(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.sessionInfo.sessionId}`,
+          ...options.headers
+        }
+      });
+
+      if (!response.ok) {
+        return rejectWithError(
+          LuxConnectErrorCode.SERVER_ERROR,
+          `API request failed: ${response.status} ${response.statusText}`,
+          { status: response.status, statusText: response.statusText, endpoint }
+        );
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      return response;
+    } catch (error) {
+      return rejectWithError(
+        LuxConnectErrorCode.NETWORK_ERROR,
+        `Network error during API request to ${endpoint}`,
+        { endpoint },
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
-
-    return response;
   }
 
   /**
@@ -783,6 +845,32 @@ Auth data: ${JSON.stringify(authData)}`);
    */
   private async connectWebSocket(): Promise<void> {
     return new Promise(async (resolve, reject) => {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      let isSettled = false; // Track if promise is already resolved/rejected
+
+      const cleanup = () => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+      };
+
+      const safeResolve = () => {
+        if (!isSettled) {
+          isSettled = true;
+          cleanup();
+          resolve();
+        }
+      };
+
+      const safeReject = (error: any) => {
+        if (!isSettled) {
+          isSettled = true;
+          cleanup();
+          reject(error);
+        }
+      };
+
       try {
         // Automatically determine WebSocket protocol based on HTTP protocol
         let wsProtocol: string;
@@ -813,11 +901,11 @@ Auth data: ${JSON.stringify(authData)}`);
         this.webSocketManager.setupEvents(
           () => {
             console.log('WebSocket connected successfully');
-            resolve();
+            safeResolve();
           },
           (error: any) => {
             console.error('WebSocket connection error:', error);
-            reject(error);
+            safeReject(error);
           },
           (event: any) => {
             const code = event?.code || 'unknown';
@@ -842,15 +930,15 @@ Auth data: ${JSON.stringify(authData)}`);
           }
         );
 
-        // Timeout for connection
-        setTimeout(() => {
+        // Timeout for connection with proper cleanup
+        timeoutHandle = setTimeout(() => {
           if (this.webSocketManager.readyState !== 1) { // OPEN
-            reject(new Error('WebSocket connection timeout'));
+            safeReject(new Error('WebSocket connection timeout'));
           }
-        }, 5000);
+        }, 10000); // Increased timeout to 10 seconds
 
       } catch (error) {
-        reject(error);
+        safeReject(error);
       }
     });
   }

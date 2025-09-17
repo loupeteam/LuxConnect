@@ -135,11 +135,17 @@ describe('Array Element Writing', () => {
     });
 
     it('should throw error for unknown variables', async () => {
+      // Set strict error policy to ensure errors are thrown for testing
+      variableManager.setErrorPolicy('strict');
       await expect(variableManager.writeValue('UnknownArray[0]', 123))
         .rejects.toThrow("Failed to write array element 'UnknownArray[0]'");
+      // Reset to default policy
+      variableManager.setErrorPolicy('default');
     });
 
     it('should throw error for out of bounds index during fallback', async () => {
+      // Set strict error policy to ensure errors are thrown for testing
+      variableManager.setErrorPolicy('strict');
       variableManager.registerVariable('TestArray', 'ns=5;s=::TestArray');
       
       // Mock direct write failure, then read for bounds checking
@@ -155,9 +161,13 @@ describe('Array Element Writing', () => {
 
       await expect(variableManager.writeValue('TestArray[5]', 123))
         .rejects.toThrow('Array index 5 is out of bounds for array of length 2');
+      // Reset to default policy
+      variableManager.setErrorPolicy('default');
     });
 
     it('should throw error for non-array variable during fallback', async () => {
+      // Set strict error policy to ensure errors are thrown for testing
+      variableManager.setErrorPolicy('strict');
       variableManager.registerVariable('NotAnArray', 'ns=5;s=::NotAnArray');
       
       // Mock direct write failure, then read for type checking
@@ -173,6 +183,8 @@ describe('Array Element Writing', () => {
 
       await expect(variableManager.writeValue('NotAnArray[0]', 123))
         .rejects.toThrow("Variable 'NotAnArray' is not an array (got string)");
+      // Reset to default policy
+      variableManager.setErrorPolicy('default');
     });
   });
 

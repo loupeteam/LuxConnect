@@ -40,6 +40,15 @@ export { OpcuaMachine } from './opcua-machine.js';
 // Core functionality classes
 export { OpcuaConnection } from './connection.js';
 
+// Error handling
+export { 
+  LuxConnectError, 
+  LuxConnectErrorCode, 
+  rejectWithError, 
+  safeOperation, 
+  isLuxConnectError 
+} from './errors.js';
+
 // Type definitions
 export type {
   ConnectionConfig,
@@ -50,7 +59,8 @@ export type {
   VariableChangeEvent,
   VariableChangeHandler,
   ConnectionStateHandler,
-  ErrorHandler
+  ErrorHandler,
+  ErrorPolicy
 } from './types.js';
 
 export { ConnectionState } from './types.js';

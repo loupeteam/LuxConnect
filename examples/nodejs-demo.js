@@ -15,7 +15,26 @@
  * 2. Run: node examples/simple-nodejs-demo-clean.js
  */
 
-import { OpcuaMachine } from '../dist/index.js';
+import { OpcuaMachine, isLuxConnectError, LuxConnectErrorCode } from '../dist/index.js';
+
+// Global error handlers to prevent crashes from unhandled promises
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  if (isLuxConnectError(reason)) {
+    console.error(`   LuxConnect Error [${reason.code}]: ${reason.message}`);
+    if (reason.isConnectionError()) {
+      console.error('   → This appears to be a connection issue');
+      return; // Don't exit for connection errors
+    }
+  }
+  console.error('   → This might indicate a programming error that should be fixed');
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error);
+  console.error('   → The process will exit');
+  process.exit(1);
+});
 
 // Configure Node.js to accept self-signed certificates (for development only)
 process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
@@ -41,6 +60,13 @@ async function simpleDemo() {
 
   // Create the OPC UA machine
   const machine = new OpcuaMachine(config);
+
+  // Configure error handling policy
+  console.log('🛡️  Setting error policy to "default" - reads will not crash, will return cached values');
+  machine.setErrorPolicy('default'); // Won't crash on unhandled read errors
+  
+  // Uncomment the next line to enable strict mode (will crash on unhandled errors)
+  // machine.setErrorPolicy('strict');
 
   try {
     // Set up event handlers
@@ -73,33 +99,27 @@ async function simpleDemo() {
     // Add some example variables (adjust these paths to match your PLC variables)
 
     // Example 1: A simple test structure
-    // machine.initCyclicRead('::demo:test', (value) => {
-      // console.log(`📈 TestStruct: ${JSON.stringify(value, null, 2)}`);
-    // });
+    machine.initCyclicRead('::demo:test');
 
-    // // Example 2: Individual structure members
-    // machine.initCyclicRead('::demo:test.command', (value) => {
-    //   console.log(`🎛️  Command: ${value}`);
-    // });
+    "ApplicationModule::Scope:PLC_PRG.test";
 
-    // machine.initCyclicRead('::demo:test.slider', (value) => {
-    //   console.log(`📊 Slider: ${value}`);
-    // });
+    // Example 2: Individual structure members
+    machine.initCyclicRead('::demo:test.command');
 
-    // // Example 3: A global variable
-    // machine.initCyclicRead('gtest.myvalue.x', (value) => {
-    //   console.log(`🌍 Global test value: ${value}`);
-    // });
+    machine.initCyclicRead('::demo:test.slider');
 
-    // let doubleArray = await machine.readVariable('::testarray.doubleArray');
+    // Example 3: A global variable
+    machine.initCyclicRead('gtest.myvalue.x');
 
-    // console.log(`📝 Initial read return : = ${JSON.stringify(doubleArray)}`);
-    // console.log(`📝 Initial read global structure: = ${JSON.stringify(machine.testarray.doubleArray)}`);
-    // let value = machine.testarray.doubleArray[0][0].member1 + 1;
-    // console.log(`📝 read incremented value: = ${value}`);
-    // await machine.writeVariable('::testarray.doubleArray[0,0]', {member1: value});
-    // await machine.readVariable('::testarray.doubleArray[0,0]');
-    // console.log(`📝 Final read: = ${JSON.stringify(machine.testarray.doubleArray[0][0].member1)}`);
+    let doubleArray = await machine.readVariable('::testarray.doubleArray');
+
+    console.log(`📝 Initial read return : = ${JSON.stringify(doubleArray)}`);
+    console.log(`📝 Initial read global structure: = ${JSON.stringify(machine.testarray.doubleArray)}`);
+    let value = machine.testarray.doubleArray[0][0].member1 + 1;
+    console.log(`📝 read incremented value: = ${value}`);
+    await machine.writeVariable('::testarray.doubleArray[0,0]', {member1: value});
+    await machine.readVariable('::testarray.doubleArray[0,0]');
+    console.log(`📝 Final read: = ${JSON.stringify(machine.testarray.doubleArray[0][0].member1)}`);
 
     await machine.writeVariable('::testarray.doubleArray[0,2]', {member1: 100});
     // let member1 = await machine.readVariable('::testarray.doubleArray[0,2].member1');
@@ -124,24 +144,42 @@ async function simpleDemo() {
       counter++;
       
       try {
-        // Read some values explicitly (one-time reads)
-        machine.readVariable('::demo:test.command').then(v=>{
-          console.log(`📝 Explicit read: test.command=${v}`);
-        });
-        await machine.readVariable('gtest.myvalue.x').then(v=>{
-          console.log(`📝 Explicit read: gtest.myvalue.x=${v}`);
-        });
+        // Read some values explicitly - now with crash-resistant behavior!
+        // These reads will NOT crash if the connection fails - they'll return cached values and log warnings
+        
+        // This read will not crash even without .catch() in default mode
+        machine.readVariable('::demo:test.command'); // No await, no .catch() - but won't crash!
+        
+        // You can still handle errors explicitly if needed
+        machine.readVariable('::demo:test.command')
+          .then(v => {
+            console.log(`� Explicit read: test.command=${v}`);
+          })
+          .catch(error => {
+            // This .catch() is now optional - the library won't crash without it
+            console.log(`⚠️ Explicit error handling: ${error.message}`);
+          });
+          
+        // Await with no .catch() - in default mode this won't crash
+        let myval = await machine.readVariable('gtest.myvalue.x');
+        console.log(`📝 Global variable: gtest.myvalue.x=${myval}`);
 
         // Try writing a value
         if (counter === 5) {
           console.log('\n✏️  Writing test values...');
-          machine.writeVariable('::demo:test.command', counter * 10);
-          machine.writeVariable('gtest.myvalue.x', counter * 5.5);
+          // These writes also won't crash in default mode
+          await machine.writeVariable('::demo:test.command', counter * 10);
+          await machine.writeVariable('gtest.myvalue.x', counter * 5.5);
           console.log('✅ Values written successfully\n');
         }
         
       } catch (error) {
-        console.log(`⚠️  Read/write error: ${error.message}`);
+        // This catch is now mainly for programming errors, not connection issues
+        if (isLuxConnectError(error)) {
+          console.log(`⚠️ Programming error: [${error.code}] ${error.message}`);
+        } else {
+          console.log(`❌ Unexpected error: ${error.message}`);
+        }
       }
       
       if (counter >= 30) {
@@ -160,7 +198,28 @@ async function simpleDemo() {
     console.log('   • Used both task-local (::demo:) and global variables');
 
   } catch (error) {
-    console.error('\n❌ Demo failed:', error.message);    
+    console.error('\n❌ Demo failed:');
+    if (isLuxConnectError(error)) {
+      console.error(`   Error Code: ${error.code}`);
+      console.error(`   Message: ${error.message}`);
+      
+      if (error.isConnectionError()) {
+        console.error('   → This is a connection-related error');
+        if (error.code === LuxConnectErrorCode.NOT_CONNECTED) {
+          console.error('   → The client is not connected to the server');
+        } else if (error.code === LuxConnectErrorCode.NETWORK_ERROR) {
+          console.error('   → Check if the server is running and accessible');
+        } else if (error.code === LuxConnectErrorCode.AUTHENTICATION_FAILED) {
+          console.error('   → Check username/password credentials');
+        }
+      }
+      
+      if (error.isRetryable()) {
+        console.error('   → This error could be retried');
+      }
+    } else {
+      console.error(`   ${error.message}`);
+    }
   } finally {
     // Clean disconnect
     console.log('\n🔌 Disconnecting...');

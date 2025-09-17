@@ -1,4 +1,9 @@
 /**
+ * Error handling policy for the library
+ */
+export type ErrorPolicy = 'default' | 'strict' | 'silent';
+
+/**
  * OPC UA Variable interface for type-safe variable management
  */
 export interface OpcuaVariable {

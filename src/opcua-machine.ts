@@ -6,7 +6,8 @@ import {
   ConnectionConfig, 
   ConnectionState, 
   ConnectionStateHandler, 
-  ErrorHandler 
+  ErrorHandler,
+  ErrorPolicy 
 } from './types.js';
 
 /**
@@ -347,6 +348,14 @@ export class OpcuaMachine {
     this.defaultTask = task;
     // Automatically update VariableManager
     this.variableManager.setDefaultTask(this.defaultTask);
+  }
+
+  /**
+   * Set error handling policy for read/write operations
+   * @param policy 'default' - log errors and return cached values (won't crash), 'strict' - throw unhandled rejections (will crash), 'silent' - return cached values without logging
+   */
+  public setErrorPolicy(policy: ErrorPolicy): void {
+    this.variableManager.setErrorPolicy(policy);
   }
 
   /**

@@ -2,12 +2,14 @@ import { OpcuaConnection } from './connection.js';
 import { 
   OpcuaVariable, 
   VariableChangeEvent, 
-  VariableChangeHandler 
+  VariableChangeHandler,
+  ErrorPolicy 
 } from './types.js';
 import { 
   VariableHierarchy, 
   VariablePathParser
 } from './variable-hierarchy.js';
+import { LuxConnectErrorCode, rejectWithError } from './errors.js';
 
 /**
  * Simplified variable manager using global state with deep copying
@@ -18,6 +20,9 @@ export class VariableManager {
   private hierarchy = new VariableHierarchy();
   private changeHandlers = new Map<string, VariableChangeHandler[]>();
   private globalChangeHandlers: VariableChangeHandler[] = [];
+  
+  // Error handling policy
+  private errorPolicy: ErrorPolicy = 'default';
   
   // NodeId generation settings
   private defaultNamespace: string = 'ns=5;s=';
@@ -47,6 +52,48 @@ export class VariableManager {
    */
   public setDefaultTask(task: string): void {
     this.defaultTask = task;
+  }
+
+  /**
+   * Set error handling policy
+   * @param policy 'default' - log errors and return cached values, 'strict' - throw unhandled rejections, 'silent' - return cached values without logging
+   */
+  public setErrorPolicy(policy: ErrorPolicy): void {
+    this.errorPolicy = policy;
+  }
+
+  /**
+   * Create a smart promise that handles errors according to the error policy
+   * In 'default' mode: logs errors and returns cached values, doesn't crash
+   * In 'strict' mode: rejects normally (will crash if unhandled)
+   * In 'silent' mode: returns cached values without logging
+   */
+  private createSmartPromise<T>(
+    operation: () => Promise<T>,
+    variableName: string,
+    fallbackValue?: T
+  ): Promise<T> {
+    const promise = operation();
+    
+    if (this.errorPolicy === 'strict') {
+      // In strict mode, return the promise as-is (will crash if unhandled)
+      return promise;
+    }
+    
+    // In default or silent mode, handle errors gracefully
+    return promise.catch((error: any): T => {
+      const normalizedName = this.normalizeVariableName(variableName);
+      const cachedVar = this.hierarchy.getVariable(normalizedName);
+      const cachedValue = cachedVar?.value ?? fallbackValue;
+      
+      if (this.errorPolicy === 'default') {
+        // Log the error in default mode
+        const errorMsg = error?.message || String(error);
+        console.warn(`🔄 Read failed for '${variableName}': ${errorMsg} (returning cached value: ${cachedValue})`);
+      }
+      
+      return cachedValue as T;
+    });
   }
 
   /**
@@ -281,7 +328,7 @@ export class VariableManager {
     const result = await response.json();
     
     if (result.status?.code !== 0) {
-      throw new Error(`Failed to read attribute '${attributeId}' from node '${nodeId}': ${result.statusCode?.description || 'Unknown error'}`);
+      throw new Error(`Failed to read attribute '${attributeId}' from node '${nodeId}': ${result.status?.code?.description || 'Unknown error'}`);
     }
 
     return result.value;
@@ -338,7 +385,17 @@ export class VariableManager {
    * Read the current value of a variable by name
    * No registration required - builds NodeId dynamically
    */
-  public async readValue(name: string): Promise<any> {
+  public readValue(name: string): Promise<any> {
+    return this.createSmartPromise(
+      () => this.performReadValue(name),
+      name
+    );
+  }
+
+  /**
+   * Internal method that performs the actual read operation
+   */
+  private async performReadValue(name: string): Promise<any> {
     const normalizedName = this.normalizeVariableName(name);
     
     // Try to get nodeId from registered variable first
@@ -347,7 +404,16 @@ export class VariableManager {
     if (varData) {
       targetNodeId = varData.mapping.nodeId;
     } else {
-      targetNodeId = this.buildNodeId(name);
+      try {
+        targetNodeId = this.buildNodeId(name);
+      } catch (error) {
+        return rejectWithError(
+          LuxConnectErrorCode.INVALID_VARIABLE_NAME,
+          `Invalid variable name '${name}': ${error}`,
+          { variableName: name },
+          error instanceof Error ? error : new Error(String(error))
+        );
+      }
     }
 
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(targetNodeId)}/attributes/Value`, {
@@ -357,7 +423,16 @@ export class VariableManager {
     const result = await response.json();
     
     if (result.status?.code !== 0) {
-      throw new Error(`Failed to read variable '${name}': ${result.statusCode?.description || 'Unknown error'}`);
+      return rejectWithError(
+        LuxConnectErrorCode.READ_FAILED,
+        `Failed to read variable '${name}': ${result.status?.code?.description || 'Unknown error'}`,
+        { 
+          variableName: name, 
+          nodeId: targetNodeId, 
+          statusCode: result.status?.code,
+          statusDescription: result.status?.code?.description 
+        }
+      );
     }
 
     const newValue = result.value;
@@ -366,7 +441,7 @@ export class VariableManager {
 
     // If variable is registered, update hierarchy and emit change events
     const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
-    if (varData) {  
+    if (varData) {
       // Emit change events for all affected variables
       for (const affectedName of affectedVariables) {
         const affectedData = this.hierarchy.getVariable(affectedName);
@@ -377,14 +452,22 @@ export class VariableManager {
     }
 
     return newValue;
-  }
-
-  /**
+  }  /**
    * Write a value to a variable by name
    * For complex objects, decomposes them into individual simple values and uses batch write
    * For array elements with primitive values, uses read-modify-write approach
    */
-  public async writeValue(name: string, value: any): Promise<void> {
+  public writeValue(name: string, value: any): Promise<void> {
+    return this.createSmartPromise(
+      () => this.performWriteValue(name, value),
+      name
+    );
+  }
+
+  /**
+   * Internal method that performs the actual write operation
+   */
+  private async performWriteValue(name: string, value: any): Promise<void> {
     const normalizedName = this.normalizeVariableName(name);
     
     // Check if this is an array element access pattern (e.g., "myArray[0]", "obj.array[1]")
@@ -588,7 +671,7 @@ export class VariableManager {
         const failures: string[] = [];
         results.responses.forEach((result: any, index: number) => {
           if (result.status >= 400 || (result.body && result.body.status?.code !== 0)) {
-            const errorMsg = result.body?.statusCode?.description || result.statusText || 'Unknown error';
+            const errorMsg = result.body?.status?.code?.description || result.statusText || 'Unknown error';
             failures.push(`${writes[index].path}: ${errorMsg}`);
           }
         });
@@ -683,7 +766,7 @@ export class VariableManager {
     const result = await response.json();
     
     if (result.status?.code !== 0) {
-      throw new Error(`Failed to write value: ${result.statusCode?.description || 'Unknown error'}`);
+      throw new Error(`Failed to write value: ${result.status?.code?.description || 'Unknown error'}`);
     }
   }
 
