@@ -24,7 +24,9 @@ if (!isBrowser) {
   });
 }
 
-// Platform-specific WebSocket handling
+/**
+ * Enhanced WebSocket manager with better error handling and reconnection logic
+ */
 class WebSocketManager {
   private ws: any = null;
   private isClosingProgrammatically = false;

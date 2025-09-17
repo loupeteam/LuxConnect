@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { VariableHierarchy, VariablePathParser, type VariableMapping } from '../../src/variable-hierarchy.js';
+import { VariableHierarchy} from '../../src/variable-hierarchy.js';
 
 describe('VariableHierarchy (Cross-Platform)', () => {
   let hierarchy: VariableHierarchy;
@@ -401,15 +401,6 @@ describe('VariableHierarchy (Cross-Platform)', () => {
 
   describe('edge cases and error handling', () => {
     it('should handle complex nested structures correctly', () => {
-      const complexValue = {
-        level1: {
-          level2: {
-            level3: {
-              deepValue: 'found'
-            }
-          }
-        }
-      };
       
       hierarchy.addVariable('Complex.level1.level2.level3.deepValue', 'ns=1;s=Complex.level1.level2.level3.deepValue', 'found', mockDate, 'good');
       
@@ -451,6 +442,8 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       const structure = hierarchy.getVariable('System.Config');
       
       expect(component!.value).toBe(2000);
+      expect(structure!.value.timeout).toBe(2000);
+
       // The global state should reflect the change
       const globalState = hierarchy.getGlobalState();
       expect(globalState._default.AsGlobalPV.System.Config.timeout).toBe(2000);
