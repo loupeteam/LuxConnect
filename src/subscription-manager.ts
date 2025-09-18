@@ -12,7 +12,6 @@ interface SubscriptionInfo {
   name: string;  
   monitoredItems: Map<number, MonitoredItemInfo>;
   desiredVariables: Set<string>; // Variables we want to monitor
-  actualNodeIds: Set<string>;    // NodeIds we're actually monitoring
   parameters: SubscriptionOptions; // Store options for reference
 }
 
@@ -101,7 +100,6 @@ export class SubscriptionManager {
       name,
       monitoredItems: new Map(),
       desiredVariables: new Set(),
-      actualNodeIds: new Set(),
       parameters: subscriptionParams
     };
 
@@ -219,9 +217,15 @@ export class SubscriptionManager {
     // Determine optimal set of nodeIds to subscribe to for THIS subscription
     const consolidatedNodeIds = this.findOptimalSubscriptionSet(subscriptionHierarchy);
 
+    // Get currently monitored nodeIds from the monitoredItems map
+    const currentlyMonitored = new Set<string>();
+    for (const [, monitoredItem] of subscription.monitoredItems) {
+      currentlyMonitored.add(monitoredItem.nodeId);
+    }
+
     // Calculate what needs to be added/removed
-    const toAdd = Array.from(consolidatedNodeIds).filter(nodeId => !subscription.actualNodeIds.has(nodeId));
-    const toRemove = Array.from(subscription.actualNodeIds).filter(nodeId => !consolidatedNodeIds.has(nodeId));
+    const toAdd = Array.from(consolidatedNodeIds).filter(nodeId => !currentlyMonitored.has(nodeId));
+    const toRemove = Array.from(currentlyMonitored).filter(nodeId => !consolidatedNodeIds.has(nodeId));
 
     // Use batch operations for efficiency when dealing with multiple items
     if (toRemove.length > 1) {
@@ -231,7 +235,6 @@ export class SubscriptionManager {
       // Remove obsolete monitored items individually
       for (const nodeId of toRemove) {
         await this.removeMonitoredItemByNodeId(subscription, nodeId);
-        subscription.actualNodeIds.delete(nodeId);
       }
     }
 
@@ -648,7 +651,6 @@ export class SubscriptionManager {
             };
 
             subscription.monitoredItems.set(response.body.monitoredItemId, monitoredItemInfo);
-            subscription.actualNodeIds.add(originalItem._metadata.nodeId);
             this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
           } else {
             console.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
@@ -759,7 +761,6 @@ export class SubscriptionManager {
       // Clean up local state
       for (const item of itemsToRemove) {
         subscription.monitoredItems.delete(item.monitoredItemId);
-        subscription.actualNodeIds.delete(item.nodeId);
         this.clientHandleMap.delete(item.clientHandle);
       }
       
@@ -797,7 +798,7 @@ export class SubscriptionManager {
     // Use the connection's message handler instead of direct WebSocket access
 // eslint-disable-next-line @typescript-eslint/no-explicit-any    
     this.connection.onMessage((message: any) => {
-      if (message.DataNotifications && Array.isArray(message.DataNotifications)) {
+      if (message && message.DataNotifications && Array.isArray(message.DataNotifications)) {
         for (const dataNotification of message.DataNotifications) {
           this.handleDataNotification(dataNotification);
         }
