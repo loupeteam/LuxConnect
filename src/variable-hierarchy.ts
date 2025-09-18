@@ -862,17 +862,15 @@ export class VariableHierarchy {
     const result = { ...existingObj };
 
     for (const key in newObj) {
-      if (newObj.hasOwnProperty(key)) {
-        const newValue = newObj[key];
-        const existingValue = result[key];
+      const newValue = newObj[key];
+      const existingValue = result[key];
 
-        if (this.shouldMergeObjects(existingValue, newValue)) {
-          // Recursively merge nested objects/arrays
-          result[key] = this.deepMerge(existingValue, newValue);
-        } else {
-          // Replace with new value (primitives, arrays, null, etc.)
-          result[key] = newValue;
-        }
+      if (this.shouldMergeObjects(existingValue, newValue)) {
+        // Recursively merge nested objects/arrays
+        result[key] = this.deepMerge(existingValue, newValue);
+      } else {
+        // Replace with new value (primitives, arrays, null, etc.)
+        result[key] = newValue;
       }
     }
 

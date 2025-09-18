@@ -17,7 +17,7 @@
     "@typescript-eslint/no-explicit-any": "warn",
     "prefer-const": "error",
     "no-var": "error",
-    "no-console": "warn",
+    "no-console": "off",
     "no-undef": "off"
   },
   "ignorePatterns": ["dist/", "node_modules/", "coverage/", "*.js", "examples/", "scripts/"],

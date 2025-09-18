@@ -96,21 +96,13 @@ export class VariableManager {
     });
   }
 
+  
   /**
    * Register a variable with format validation and optional array parameter detection
    * @param name Variable name
    * @param nodeId Node ID
    * @param readArrayParams Whether to read and store array parameters (ValueRank, ArrayDimensions)
    */
-  public async registerVariable(name: string, nodeId: string, readArrayParams: boolean): Promise<OpcuaVariable>;
-  
-  /**
-   * Register a variable with format validation (synchronous version for backward compatibility)
-   * @param name Variable name
-   * @param nodeId Node ID
-   */
-  public registerVariable(name: string, nodeId: string): OpcuaVariable;
-  
   public registerVariable(name: string, nodeId: string, readArrayParams: boolean = false): OpcuaVariable | Promise<OpcuaVariable> {
     if (readArrayParams) {
       return this.registerVariableAsync(name, nodeId, true);

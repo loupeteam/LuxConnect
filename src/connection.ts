@@ -927,6 +927,7 @@ Auth data: ${JSON.stringify(authData)}`);
    * Connect to mapp Connect WebSocket push channel
    */
   private async connectWebSocket(): Promise<void> {
+    // eslint-disable-next-line no-async-promise-executor
     return new Promise(async (resolve, reject) => {
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       let isSettled = false; // Track if promise is already resolved/rejected

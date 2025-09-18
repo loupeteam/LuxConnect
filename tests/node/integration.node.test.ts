@@ -184,7 +184,6 @@ describe('Integration Tests - Real Server Communication', () => {
     machine = new OpcuaMachine(TEST_CONFIG);
     
     // Set up error handling
-    let connectionError: Error | null = null;
     machine.onError((error) => {
       connectionError = error;
     });
@@ -1331,7 +1330,6 @@ describe('Integration Tests - Real Server Communication', () => {
       
       // Test error handler registration
       let errorReceived = false;
-      let receivedError: Error | null = null;
       
       machine.onError((error) => {
         errorReceived = true;
