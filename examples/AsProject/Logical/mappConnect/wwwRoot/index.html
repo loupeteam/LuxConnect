@@ -146,6 +146,21 @@
             width: 212px;
             background-color: white;
         }
+        .user-info {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .current-user {
+            font-weight: bold;
+            color: #007bff;
+        }
+        .current-roles {
+            font-style: italic;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -231,6 +246,44 @@
         </div>
 
         <div id="status" class="status disconnected">Disconnected</div>
+
+        <h2>User Management</h2>
+        <div class="user-info">
+            <div class="input-group">
+                <label for="currentUser">Current User:</label>
+                <span id="currentUser" class="current-user">Not logged in</span>
+            </div>
+            <div class="input-group">
+                <label for="currentRoles">User Roles:</label>
+                <span id="currentRoles" class="current-roles">-</span>
+            </div>
+        </div>
+        <div class="controls">
+            <button id="refreshSessionBtn" onclick="refreshSessionInfo()" disabled>Refresh Session Info</button>
+            <button id="switchToOperatorBtn" onclick="switchToOperator()" disabled>Switch to Operator</button>
+            <button id="switchToAnonymousBtn" onclick="switchToAnonymous()" disabled>Switch to Anonymous</button>
+            <button id="switchBackToAdminBtn" onclick="switchBackToAdmin()" disabled>Switch Back to Admin</button>
+        </div>
+
+        <h2>🛡️ Error Policy Testing</h2>
+        <p>Test how the library handles errors in different modes:</p>
+        
+        <div class="input-group">
+            <label for="errorPolicy">Error Policy:</label>
+            <select id="errorPolicy">
+                <option value="default">Default (log errors, return cached values)</option>
+                <option value="silent">Silent (return cached values, no logs)</option>
+                <option value="strict">Strict (throw errors, may crash)</option>
+            </select>
+        </div>
+        
+        <div class="controls">
+            <button id="setErrorPolicyBtn" onclick="setErrorPolicy()" disabled>Apply Policy</button>
+            <button id="testErrorHandlingBtn" onclick="testErrorHandling()" disabled>Test Error Handling</button>
+            <button id="testWithUserCatchBtn" onclick="testWithUserCatch()" disabled>Test with User .catch()</button>
+        </div>
+        
+        <div id="errorTestResults" class="results" style="margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f9f9f9;"></div>
 
         <h2>Variables</h2>
         <div class="controls">
