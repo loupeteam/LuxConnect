@@ -1,3 +1,5 @@
+import { OpcuaValue, OpcuaObject, OpcuaArray } from './types';
+
 /**
  * Simplified variable hierarchy using a single state object with deep copying
  * Much simpler approach that's easier to understand and maintain
@@ -60,7 +62,7 @@ export class VariablePathParser {
   }
   
   /**
-   * Parse a mapp Connect variable name into components
+   * Parse a variable name into components
    * Supports multiple formats:
    * - 'VarName' → Global variable (AsGlobalPV scope)
    * - 'TaskName:VarName' → Task local variable
@@ -341,7 +343,7 @@ export class VariablePathParser {
  * Variable hierarchy using global state object
  */
 export class VariableHierarchy {
-  private globalState: any = {};
+  private globalState: OpcuaObject = {};
   private variables = new Map<string, VariableMapping>();
   private nodeIdToName = new Map<string, string>();
   private stateMetadata = new Map<string, { timestamp: Date; quality: string }>();
@@ -353,7 +355,7 @@ export class VariableHierarchy {
   addVariable(
     name: string, 
     nodeId: string, 
-    value: any, 
+    value: OpcuaValue, 
     timestamp: Date, 
     quality: string, 
     dataType?: string,
@@ -395,7 +397,7 @@ export class VariableHierarchy {
   /**
    * Update a variable value with automatic propagation
    */
-  updateVariable(name: string, value: any, timestamp: Date, quality: string): string[] {
+  updateVariable(name: string, value: OpcuaValue, timestamp: Date, quality: string): string[] {
     let mapping = this.variables.get(name);
     if (!mapping) {
       // If no mapping exists, create one with proper nodeId (uses global defaults from VariablePathParser)
@@ -415,7 +417,7 @@ export class VariableHierarchy {
   /**
    * Get variable by name
    */
-  getVariable(name: string): { mapping: VariableMapping; value: any; timestamp: Date; quality: string } | undefined {
+  getVariable(name: string): { mapping: VariableMapping; value: OpcuaValue; timestamp: Date; quality: string } | undefined {
     const mapping = this.variables.get(name);
     if (!mapping) return undefined;
 
@@ -428,7 +430,7 @@ export class VariableHierarchy {
   /**
    * Get variable by nodeId
    */
-  getVariableByNodeId(nodeId: string): { mapping: VariableMapping; value: any; timestamp: Date; quality: string } | undefined {
+  getVariableByNodeId(nodeId: string): { mapping: VariableMapping; value: OpcuaValue; timestamp: Date; quality: string } | undefined {
     const name = this.nodeIdToName.get(nodeId);
     return name ? this.getVariable(name) : undefined;
   }
@@ -436,7 +438,7 @@ export class VariableHierarchy {
   /**
    * Get all variables
    */
-  getAllVariables(): Map<string, { mapping: VariableMapping; value: any; timestamp: Date; quality: string }> {
+  getAllVariables(): Map<string, { mapping: VariableMapping; value: OpcuaValue; timestamp: Date; quality: string }> {
     const result = new Map();
     
     for (const [name] of this.variables) {
@@ -495,7 +497,7 @@ export class VariableHierarchy {
    * Modifying it directly will bypass validation and notification systems.
    * Use updateVariable() or writeVariable() methods to make changes.
    */
-  getGlobalState(): any {
+  getGlobalState(): OpcuaObject {
     return this.globalState;
   }
 
@@ -577,7 +579,7 @@ export class VariableHierarchy {
   /**
    * Get value at a specific path in an object
    */
-  private getValueAtPath(obj: any, path: string[]): any {
+  private getValueAtPath(obj: OpcuaObject, path: string[]): OpcuaValue {
     let current = obj;
     for (const segment of path) {
       if (current == null || typeof current !== 'object') {
@@ -619,7 +621,7 @@ export class VariableHierarchy {
   /**
    * Set value at a specific path in an object (mutates the object directly for performance)
    */
-  private setValueAtPath(obj: any, path: string[], value: any): void {
+  private setValueAtPath(obj: OpcuaObject, path: string[], value: OpcuaValue): void {
     if (path.length === 0) {
       // Cannot set root object directly
       throw new Error('Cannot set value at empty path');
@@ -645,7 +647,7 @@ export class VariableHierarchy {
   /**
    * Ensure a path segment exists and return the next level
    */
-  private ensurePathSegment(current: any, segment: string, isArray: boolean): any {
+  private ensurePathSegment(current: OpcuaValue, segment: string, isArray: boolean): OpcuaValue {
     if (this.isArrayIndex(segment)) {
       // Handle array indices - keep arrays flat and simple
       const indices = this.parseArrayIndices(segment);
@@ -659,7 +661,7 @@ export class VariableHierarchy {
           const index = indices[j];
           if (!Array.isArray(target)) {
             // Convert to array if needed
-            const newArray: any[] = [];
+            const newArray: OpcuaArray = [];
             if (target && typeof target === 'object') {
               Object.keys(target).forEach(key => {
                 const numKey = parseInt(key, 10);
@@ -690,7 +692,7 @@ export class VariableHierarchy {
       // Single-dimensional access - ensure current is a proper array
       if (!Array.isArray(current)) {
         // Convert object with numeric keys to real array
-        const newArray: any[] = [];
+        const newArray: OpcuaArray = [];
         if (current && typeof current === 'object') {
           Object.keys(current).forEach(key => {
             const numKey = parseInt(key, 10);
@@ -720,7 +722,7 @@ export class VariableHierarchy {
         current[segment] = isArray ? [] : {};
       } else if (isArray && !Array.isArray(current[segment])) {
         // Convert object to array if needed
-        const newArray: any[] = [];
+        const newArray: OpcuaArray = [];
         if (typeof current[segment] === 'object') {
           Object.keys(current[segment]).forEach(key => {
         const numKey = parseInt(key, 10);
@@ -732,7 +734,7 @@ export class VariableHierarchy {
         current[segment] = newArray;
       } else if (!isArray && Array.isArray(current[segment])) {
         // Convert array to object if needed
-        const newObj: any = {};
+        const newObj: OpcuaObject = {};
         current[segment].forEach((value, index) => {
           newObj[index] = value;
         });
@@ -745,7 +747,7 @@ export class VariableHierarchy {
   /**
    * Set a value on a path segment (final step)
    */
-  private setPathSegmentValue(current: any, segment: string, value: any): void {
+  private setPathSegmentValue(current: OpcuaValue, segment: string, value: OpcuaValue): void {
     if (this.isArrayIndex(segment)) {
       // Handle array indices 
       const indices = this.parseArrayIndices(segment);
@@ -781,7 +783,7 @@ export class VariableHierarchy {
   /**
    * Check if two values should be merged (both are mergeable objects or arrays)
    */
-  private shouldMergeObjects(existing: any, newValue: any): boolean {
+  private shouldMergeObjects(existing: OpcuaValue, newValue: OpcuaValue): boolean {
     return existing != null &&
            newValue != null &&
            this.isMergeable(existing) &&
@@ -792,14 +794,14 @@ export class VariableHierarchy {
   /**
    * Check if a value is mergeable (plain object or array)
    */
-  private isMergeable(value: any): boolean {
+  private isMergeable(value: OpcuaValue): boolean {
     return this.isPlainObject(value) || Array.isArray(value);
   }
 
   /**
    * Check if a value is a plain object (not array, date, or other special types)
    */
-  private isPlainObject(value: any): boolean {
+  private isPlainObject(value: OpcuaValue): boolean {
     return value != null &&
            typeof value === 'object' &&
            !Array.isArray(value) &&
@@ -810,7 +812,7 @@ export class VariableHierarchy {
   /**
    * Deep merge two objects or arrays, with newObj properties overriding existing ones
    */
-  private deepMerge(existing: any, newObj: any): any {
+  private deepMerge(existing: OpcuaValue, newObj: OpcuaValue): OpcuaValue {
     // Handle array merging by index
     if (Array.isArray(existing) && Array.isArray(newObj)) {
       return this.mergeArraysByIndex(existing, newObj);
@@ -828,7 +830,7 @@ export class VariableHierarchy {
   /**
    * Merge arrays by index, preserving existing elements not overridden by new array
    */
-  private mergeArraysByIndex(existingArray: any[], newArray: any[]): any[] {
+  private mergeArraysByIndex(existingArray: OpcuaArray, newArray: OpcuaArray): OpcuaArray {
     // Start with a copy of the existing array
     const result = [...existingArray];
 
@@ -858,7 +860,7 @@ export class VariableHierarchy {
   /**
    * Merge plain objects, with new properties overriding existing ones
    */
-  private mergeObjects(existingObj: any, newObj: any): any {
+  private mergeObjects(existingObj: OpcuaObject, newObj: OpcuaObject): OpcuaObject {
     const result = { ...existingObj };
 
     for (const key in newObj) {
@@ -967,10 +969,8 @@ export class VariableHierarchy {
    * Convert an object with array-like keys to a proper array
    */
   /* TODO: Remove if not needed for backward compatibility
-  private convertObjectToArray(obj: any): any[] {
-  /* TODO: Remove if not needed for backward compatibility
-  private convertObjectToArray(obj: any): any[] {
-    const result: any[] = [];
+  private convertObjectToArray(obj: OpcuaObject): OpcuaArray {
+    const result: OpcuaArray = [];
     
     for (const [key, value] of Object.entries(obj)) {
       if (this.isArrayIndex(key)) {
@@ -997,7 +997,7 @@ export class VariableHierarchy {
   /**
    * Deep clone a value
    */
-  private deepClone(value: any): any {
+  private deepClone(value: OpcuaValue): OpcuaValue {
     if (value == null || typeof value !== 'object') {
       return value;
     }
@@ -1006,7 +1006,7 @@ export class VariableHierarchy {
       return value.map(item => this.deepClone(item));
     }
     
-    const cloned: any = {};
+    const cloned: OpcuaObject = {};
     for (const [key, val] of Object.entries(value)) {
       cloned[key] = this.deepClone(val);
     }

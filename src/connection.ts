@@ -3,7 +3,8 @@ import {
   SessionInfo, 
   ConnectionState, 
   ConnectionStateHandler, 
-  ErrorHandler 
+  ErrorHandler,
+  SessionRequest
 } from './types.js';
 import { LuxConnectErrorCode, rejectWithError } from './errors.js';
 
@@ -670,7 +671,7 @@ Original error: ${originalMessage}`);
     const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
     console.log(`Creating OPC UA session directly: ${sessionUrl}`);
 
-    const sessionRequest: any = {
+    const sessionRequest: SessionRequest = {
       url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
       timeout: this.config.sessionTimeout || 30000
     };
@@ -764,7 +765,7 @@ Original error: ${originalMessage}`);
       const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
       console.log(`Creating OPC UA session: ${sessionUrl}`);
 
-      const sessionRequest: any = {
+      const sessionRequest: SessionRequest = {
         url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
         timeout: this.config.sessionTimeout || 30000
       };

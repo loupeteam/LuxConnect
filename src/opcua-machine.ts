@@ -7,7 +7,9 @@ import {
   ConnectionState, 
   ConnectionStateHandler, 
   ErrorHandler,
-  ErrorPolicy 
+  ErrorPolicy,
+  OpcuaValue,
+  OpcuaObject
 } from './types.js';
 
 /**
@@ -35,7 +37,7 @@ export interface VariableOptions {
  */
 interface SubscriptionHandleInfo {
   varName: string;
-  callback: (value: any) => void;
+  callback: (value: OpcuaValue) => void;
   readGroup: string;
 }
 
@@ -55,7 +57,7 @@ export class OpcuaMachine {
   private subscriptionHandles?: Map<string, SubscriptionHandleInfo>;
 
   // Index signature for dynamic property access (lux.js style)
-  [key: string]: any;
+  [key: string]: OpcuaValue;
 
   constructor(config: ConnectionConfig) {
     this.connection = new OpcuaConnection(config);
@@ -86,7 +88,7 @@ export class OpcuaMachine {
       get: (target, prop: string | symbol) => {
         // If it's a known method/property, return it normally
         if (typeof prop === 'symbol' || prop in target) {
-          return (target as any)[prop];
+          return (target as unknown as Record<string | symbol, OpcuaValue>)[prop];
         }
         
         const propStr = prop.toString();
@@ -123,10 +125,10 @@ export class OpcuaMachine {
         return simpleVarValue;
       },
       
-      set: (target, prop: string | symbol, value: any) => {
+      set: (target, prop: string | symbol, value: OpcuaValue) => {
         // If it's a known property, set it normally
         if (typeof prop === 'symbol' || prop in target || prop.toString().startsWith('_')) {
-          (target as any)[prop] = value;
+          (target as unknown as Record<string | symbol, OpcuaValue>)[prop] = value;
           return true;
         }
         
@@ -242,7 +244,7 @@ export class OpcuaMachine {
    * @param callback Optional callback when value changes
    * @param options Optional configuration
    */
-  public initCyclicRead(varName: string, callback?: (value: any) => void, options: VariableOptions = {}): void {
+  public initCyclicRead(varName: string, callback?: (value: OpcuaValue) => void, options: VariableOptions = {}): void {
     const readGroup = options.readGroup || 'default';
     
     // Ensure read group exists
@@ -285,7 +287,7 @@ export class OpcuaMachine {
   /**
    * Add a variable to a specific read group (lux.js style)
    */
-  public initCyclicReadGroup(readGroupName: string, varName: string, callback?: (value: any) => void, options: VariableOptions = {}): void {
+  public initCyclicReadGroup(readGroupName: string, varName: string, callback?: (value: OpcuaValue) => void, options: VariableOptions = {}): void {
     this.initCyclicRead(varName, callback, { ...options, readGroup: readGroupName });
   }
 
@@ -327,7 +329,7 @@ export class OpcuaMachine {
    * Read a variable once (async with await)
    * No registration required - automatically resolves NodeId
    */
-  public async readVariable(varName: string): Promise<any> {
+  public async readVariable(varName: string): Promise<OpcuaValue> {
     // VariableManager already has current defaults - no need to set them again
     return await this.variableManager.readValue(varName);
   }
@@ -336,7 +338,7 @@ export class OpcuaMachine {
    * Write a variable once (async with await)
    * No registration required - automatically resolves NodeId
    */
-  public async writeVariable(varName: string, value: any): Promise<void> {
+  public async writeVariable(varName: string, value: OpcuaValue): Promise<void> {
     // VariableManager already has current defaults - no need to set them again
     await this.variableManager.writeValue(varName, value);
   }
@@ -379,7 +381,7 @@ export class OpcuaMachine {
   /**
    * Add change handler for a variable
    */
-  public onChange(varName: string, callback: (value: any) => void): void {
+  public onChange(varName: string, callback: (value: OpcuaValue) => void): void {
     // Delegate to VariableManager
     this.variableManager.onChange(varName, (event) => {
       callback(event.value);
@@ -398,7 +400,7 @@ export class OpcuaMachine {
    * @param samplingInterval Optional sampling interval in ms (default: 100ms for fast updates)
    * @returns Subscription handle for unsubscribing
    */
-  public async subscribe(varName: string, callback: (value: any) => void, samplingInterval: number = 100): Promise<string> {
+  public async subscribe(varName: string, callback: (value: OpcuaValue) => void, samplingInterval: number = 100): Promise<string> {
     // Generate unique subscription handle for this variable+callback combination
     const subscriptionHandle = `${varName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -483,7 +485,7 @@ export class OpcuaMachine {
    * Get a value from the global state hierarchy with intelligent fallback
    * Supports: machine.varname (checks global first, then tasks), machine.task.varname, etc.
    */
-  public getFromGlobalState(path: string): any {
+  public getFromGlobalState(path: string): OpcuaValue {
     const globalState = this.variableManager.getGlobalState();
     const pathComponents = path.split('.');
     
@@ -555,7 +557,7 @@ export class OpcuaMachine {
   /**
    * Get the complete global state (for debugging and introspection)
    */
-  public getGlobalState(): any {
+  public getGlobalState(): OpcuaObject {
     return this.variableManager.getGlobalState();
   }
 
@@ -563,7 +565,7 @@ export class OpcuaMachine {
    * Create a proxy for accessing scopes within an app module
    * Handles: machine.AppModule.ScopeName
    */
-  private createScopeProxy(appModule: string): any {
+  private createScopeProxy(appModule: string): OpcuaObject {
     const target = this;
     return new Proxy({}, {
       get: (_obj, prop: string | symbol) => {
@@ -587,7 +589,7 @@ export class OpcuaMachine {
    * Handles: machine.ScopeName.VarName or machine.AppModule.ScopeName.VarName
    * Also supports: machine.ScopeName (returns all variables in scope)
    */
-  private createVariableProxy(appModule: string, scope: string, scopeData?: any): any {
+  private createVariableProxy(appModule: string, scope: string, scopeData?: OpcuaValue): OpcuaObject | undefined {
     const target = this;
     const data = scopeData || target.variableManager.getGlobalState()[appModule]?.[scope];
     

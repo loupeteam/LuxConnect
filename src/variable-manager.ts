@@ -3,7 +3,9 @@ import {
   OpcuaVariable, 
   VariableChangeEvent, 
   VariableChangeHandler,
-  ErrorPolicy 
+  ErrorPolicy,
+  OpcuaValue,
+  OpcuaObject
 } from './types.js';
 import { 
   VariableHierarchy, 
@@ -449,7 +451,7 @@ export class VariableManager {
    * For complex objects, decomposes them into individual simple values and uses batch write
    * For array elements with primitive values, uses read-modify-write approach
    */
-  public writeValue(name: string, value: any): Promise<void> {
+  public writeValue(name: string, value: OpcuaValue): Promise<void> {
     return this.createSmartPromise(
       () => this.performWriteValue(name, value),
       name
@@ -459,7 +461,7 @@ export class VariableManager {
   /**
    * Internal method that performs the actual write operation
    */
-  private async performWriteValue(name: string, value: any): Promise<void> {
+  private async performWriteValue(name: string, value: OpcuaValue): Promise<void> {
     const normalizedName = this.normalizeVariableName(name);
     
     // Check if this is an array element access pattern (e.g., "myArray[0]", "obj.array[1]")
@@ -491,7 +493,7 @@ export class VariableManager {
    * No registration required - builds NodeId dynamically
    * No registration required - builds NodeId dynamically
    */
-  private async writeArrayElement(baseVariableName: string, index: number, value: any): Promise<void> {
+  private async writeArrayElement(baseVariableName: string, index: number, value: OpcuaValue): Promise<void> {
     const normalizedBaseName = this.normalizeVariableName(baseVariableName);
     const arrayElementName = `${baseVariableName}[${index}]`;
 
@@ -543,7 +545,7 @@ export class VariableManager {
    * Arrays of primitives are now handled as simple values since array elements
    * use read-modify-write approach
    */
-  private isComplexValue(value: any): boolean {
+  private isComplexValue(value: OpcuaValue): boolean {
     // Arrays are handled as simple values now (read-modify-write for elements)
     if (Array.isArray(value)) {
       // Only treat arrays with objects as complex (for object property decomposition)
@@ -559,7 +561,7 @@ export class VariableManager {
    * Uses Microsoft Graph JSON batching for efficient multi-variable writes
    * No registration required - builds NodeIds dynamically
    */
-  private async writeComplexValue(value: any, originalName: string): Promise<void> {
+  private async writeComplexValue(value: OpcuaValue, originalName: string): Promise<void> {
     const flattenedValues = this.flattenValue('', value);
     
     if (flattenedValues.length === 0) {
@@ -569,7 +571,7 @@ export class VariableManager {
     // Prepare batch write requests
     const batchWrites: Array<{
       nodeId: string;
-      value: any;
+      value: OpcuaValue;
       path: string;
     }> = [];
 
@@ -598,8 +600,8 @@ export class VariableManager {
   /**
    * Flatten a complex value into simple path-value pairs
    */
-  private flattenValue(basePath: string, value: any): Array<{ path: string; value: any }> {
-    const result: Array<{ path: string; value: any }> = [];
+  private flattenValue(basePath: string, value: OpcuaValue): Array<{ path: string; value: OpcuaValue }> {
+    const result: Array<{ path: string; value: OpcuaValue }> = [];
 
     if (Array.isArray(value)) {
       value.forEach((item, index) => {
@@ -631,7 +633,7 @@ export class VariableManager {
   /**
    * Execute batch write operations
    */
-  private async executeBatchWrite(writes: Array<{ nodeId: string; value: any; path: string }>, originalName: string): Promise<void> {
+  private async executeBatchWrite(writes: Array<{ nodeId: string; value: OpcuaValue; path: string }>, originalName: string): Promise<void> {
     const sessionId = this.connection.getSessionInfo()?.sessionId;
     if (!sessionId) {
       throw new Error('No active session');
@@ -715,7 +717,7 @@ export class VariableManager {
    * Write a single simple value
    * No registration required - builds NodeId dynamically
    */
-  private async writeSingleValue(normalizedName: string, value: any, originalName: string): Promise<void> {
+  private async writeSingleValue(normalizedName: string, value: OpcuaValue, originalName: string): Promise<void> {
     // Try to get nodeId from registered variable first
     let targetNodeId: string;
     const varData = this.hierarchy.getVariable(normalizedName);
@@ -747,7 +749,7 @@ export class VariableManager {
   /**
    * Write a single value by nodeId
    */
-  private async writeSingleValueByNodeId(nodeId: string, value: any): Promise<void> {
+  private async writeSingleValueByNodeId(nodeId: string, value: OpcuaValue): Promise<void> {
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -831,7 +833,7 @@ export class VariableManager {
    * Update a variable from external source (e.g., subscription notification)
    * This automatically handles hierarchical updates through the global state
    */
-  public updateVariableFromNotification(nodeId: string, value: any, timestamp: Date, quality: string): void {
+  public updateVariableFromNotification(nodeId: string, value: OpcuaValue, timestamp: Date, quality: string): void {
     const varData = this.hierarchy.getVariableByNodeId(nodeId);
     if (!varData) return;
 
@@ -875,14 +877,14 @@ export class VariableManager {
   /**
    * Get current global state (for debugging)
    */
-  public getGlobalState(): any {
+  public getGlobalState(): OpcuaObject {
     return this.hierarchy.getGlobalState();
   }
 
   /**
    * Emit change event for a variable
    */
-  private emitChangeEvent(name: string, value: any, timestamp: Date, quality: string): void {
+  private emitChangeEvent(name: string, value: OpcuaValue, timestamp: Date, quality: string): void {
     const varData = this.hierarchy.getVariable(name);
     if (!varData) return;
 

@@ -4,13 +4,49 @@
 export type ErrorPolicy = 'default' | 'strict' | 'silent';
 
 /**
+ * Semantic OPC UA Types - Usage Guide:
+ * 
+ * OpcuaValue (most general):
+ *   - Use for: Any OPC UA data (primitives, objects, arrays)
+ *   - Examples: variable values, read/write operations, callbacks
+ * 
+ * OpcuaObject (structured data):
+ *   - Use for: Objects with key-value pairs, structures, global state
+ *   - Examples: config objects, UDTs, hierarchical data
+ * 
+ * OpcuaArray (array data):
+ *   - Use for: Array-specific operations and storage
+ *   - Examples: OPC UA arrays, indexed collections
+ */
+
+/**
+ * Dynamic value type for OPC UA variables that can hold any type
+ * Used for runtime values from OPC UA server that can be primitives, objects, or arrays
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OpcuaValue = any;
+
+/**
+ * Generic object type for dynamic structures from OPC UA
+ * Used for complex data types, structs, and nested objects
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OpcuaObject = Record<string, any>;
+
+/**
+ * Dynamic array type for OPC UA arrays
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OpcuaArray = any[];
+
+/**
  * OPC UA Variable interface for type-safe variable management
  */
 export interface OpcuaVariable {
   readonly name: string;
   readonly nodeId: string;
   readonly dataType?: string;
-  value?: any;
+  value?: OpcuaValue;
   timestamp?: Date;
   quality?: string;
 }
@@ -66,13 +102,23 @@ export interface SessionInfo {
   roles?: string[];                    // Optional user roles from mapp Connect
 }
 
+// Session request interface for mapp Connect API
+export interface SessionRequest {
+  url: string;
+  timeout: number;
+  userIdentityToken?: {
+    username: string;
+    password: string;
+  };
+}
+
 /**
  * Variable change event data
  */
 export interface VariableChangeEvent {
   nodeId: string;
   name: string;
-  value: any;
+  value: OpcuaValue;
   timestamp: Date;
   quality: string;
 }
