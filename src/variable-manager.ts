@@ -220,6 +220,7 @@ export class VariableManager {
     };
 
     // Optionally read array parameters
+    // TODO: This hasn't been tested yet
     if (readArrayParams) {
       try {
         const arrayParams = await this.readArrayParameters(name);
@@ -317,6 +318,7 @@ export class VariableManager {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public async readAttribute(nodeId: string, attributeId: string): Promise<any> {
+    //TODO: This hasn't been tested yet
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/${attributeId}`, {
       method: 'GET'
     });
@@ -340,6 +342,7 @@ export class VariableManager {
     isArray: boolean;
     dimensionCount: number;
   }> {
+    //TODO: This hasn't been tested yet
     const normalizedName = this.normalizeVariableName(name);
     
     // Get or build nodeId
@@ -492,8 +495,12 @@ export class VariableManager {
    * Write a primitive value to a specific array element
    * First tries direct write to array element, falls back to read-modify-write if server doesn't support it
    * This method only handles primitive values; complex values are handled by writeComplexValue
-   * No registration required - builds NodeId dynamically
-   * No registration required - builds NodeId dynamically
+   * 
+   * Note:
+   * By default, single elements are not enabled for read or write access. This means that
+   * direct writes to elements like "myArray[0]" will often fail with "Bad_NodeIdUnknown".
+   * In such cases, the method falls back to reading the entire array, modifying the specific
+   * element, and writing the entire array back.
    */
   private async writeArrayElement(baseVariableName: string, index: number, value: OpcuaValue): Promise<void> {
     const normalizedBaseName = this.normalizeVariableName(baseVariableName);
@@ -727,7 +734,7 @@ export class VariableManager {
     if (varData) {
       targetNodeId = varData.mapping.nodeId;
     } else {
-      // Generate NodeId dynamically - no registration required!
+      // Generate NodeId dynamically
       targetNodeId = this.buildNodeId(originalName);
     }
 
