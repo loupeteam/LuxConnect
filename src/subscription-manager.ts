@@ -3,7 +3,8 @@ import { VariableManager } from './variable-manager.js';
 import { VariablePathParser } from './variable-hierarchy.js';
 import { 
   SubscriptionOptions, 
-  MonitoredItemOptions
+  MonitoredItemOptions,
+  DataNotification
 } from './types.js';
 
 interface SubscriptionInfo {
@@ -794,6 +795,7 @@ export class SubscriptionManager {
    */
   private setupWebSocketNotifications(): void {
     // Use the connection's message handler instead of direct WebSocket access
+// eslint-disable-next-line @typescript-eslint/no-explicit-any    
     this.connection.onMessage((message: any) => {
       if (message.DataNotifications && Array.isArray(message.DataNotifications)) {
         for (const dataNotification of message.DataNotifications) {
@@ -806,7 +808,7 @@ export class SubscriptionManager {
   /**
    * Handle incoming data notification from WebSocket
    */
-  private handleDataNotification(dataNotification: any): void {
+  private handleDataNotification(dataNotification: DataNotification): void {
     // Each dataNotification in the array contains the actual data value
     const monitoredItem = this.clientHandleMap.get(dataNotification.clientHandle);
     if (!monitoredItem) return;

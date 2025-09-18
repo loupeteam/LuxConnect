@@ -4,7 +4,8 @@ import {
   ConnectionState, 
   ConnectionStateHandler, 
   ErrorHandler,
-  SessionRequest
+  SessionRequest,
+  UserCredentials
 } from './types.js';
 import { LuxConnectErrorCode, rejectWithError } from './errors.js';
 
@@ -25,11 +26,14 @@ if (!isBrowser) {
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CrossPlatformWebSocket = WebSocket | any; // 'any' for Node.js ws package
+
 /**
  * Enhanced WebSocket manager with better error handling and reconnection logic
  */
 class WebSocketManager {
-  private ws: any = null;
+  private ws: CrossPlatformWebSocket = null;
   private isClosingProgrammatically = false;
 
   async create(url: string, headers?: Record<string, string>): Promise<void> {
@@ -56,6 +60,7 @@ class WebSocketManager {
         this.ws = new WebSocketClass(url, options);
         
         // Add critical error event handler immediately to prevent crashes
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.ws.on('error', (error: any) => {
           console.debug('WebSocket error during creation (handled):', error);
           // Don't let this crash the process - the setupEvents will handle it properly
@@ -70,7 +75,9 @@ class WebSocketManager {
 
   setupEvents(
     onOpen: () => void,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => void, 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     onClose: (event?: any) => void,
     onMessage: (data: string) => void
   ): void {
@@ -171,6 +178,7 @@ export class OpcuaConnection {
 
   private connectionStateHandlers: ConnectionStateHandler[] = [];
   private errorHandlers: ErrorHandler[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   private messageHandlers: Array<(data: any) => void> = [];
 
   private baseUrl: string;
@@ -325,7 +333,7 @@ export class OpcuaConnection {
     const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}`;
     
     // Prepare user identity token
-    let userIdentityToken: any;
+    let userIdentityToken: UserCredentials;
     if (username) {
       userIdentityToken = {
         username,
@@ -463,7 +471,9 @@ export class OpcuaConnection {
     
     // In Node.js, response.headers.getSetCookie() returns an array of cookie strings
     try {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
       const setCookieHeaders = (response.headers as any).getSetCookie ? 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
         (response.headers as any).getSetCookie() : 
         [response.headers.get('set-cookie')].filter(Boolean);
       
@@ -521,6 +531,7 @@ export class OpcuaConnection {
   /**
    * Add WebSocket message handler
    */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   public onMessage(handler: (data: any) => void): void {
     this.messageHandlers.push(handler);
   }
@@ -948,6 +959,7 @@ Auth data: ${JSON.stringify(authData)}`);
         }
       };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any     
       const safeReject = (error: any) => {
         if (!isSettled) {
           isSettled = true;
@@ -988,10 +1000,12 @@ Auth data: ${JSON.stringify(authData)}`);
             console.log('WebSocket connected successfully');
             safeResolve();
           },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
           (error: any) => {
             console.error('WebSocket connection error:', error);
             safeReject(error);
           },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
           (event: any) => {
             const code = event?.code || 'unknown';
             const reason = event?.reason || 'No reason provided';

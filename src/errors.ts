@@ -39,15 +39,18 @@ export enum LuxConnectErrorCode {
   TIMEOUT = 'TIMEOUT'
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type LuxErrorDetails = any;
+
 export class LuxConnectError extends Error {
   public readonly code: LuxConnectErrorCode;
-  public readonly details?: any;
+  public readonly details?: LuxErrorDetails | undefined;
   public readonly originalError?: Error | undefined;
 
   constructor(
     code: LuxConnectErrorCode, 
     message: string, 
-    details?: any, 
+    details?: LuxErrorDetails, 
     originalError?: Error
   ) {
     super(message);
@@ -108,7 +111,7 @@ export class LuxConnectError extends Error {
 export function rejectWithError(
   code: LuxConnectErrorCode, 
   message: string, 
-  details?: any, 
+  details?: LuxErrorDetails, 
   originalError?: Error
 ): Promise<never> {
   return Promise.reject(new LuxConnectError(code, message, details, originalError));
@@ -137,6 +140,7 @@ export async function safeOperation<T>(
 /**
  * Type guard to check if error is a LuxConnectError
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any     
 export function isLuxConnectError(error: any): error is LuxConnectError {
   return error instanceof LuxConnectError;
 }

@@ -83,6 +83,7 @@ export class VariableManager {
     }
     
     // In default or silent mode, handle errors gracefully
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
     return promise.catch((error: any): T => {
       const normalizedName = this.normalizeVariableName(variableName);
       const cachedVar = this.hierarchy.getVariable(normalizedName);
@@ -314,6 +315,7 @@ export class VariableManager {
    * @param nodeId The node ID to read from
    * @param attributeId The attribute ID to read (e.g., 'Value', 'ValueRank', 'ArrayDimensions', 'DataType')
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public async readAttribute(nodeId: string, attributeId: string): Promise<any> {
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/${attributeId}`, {
       method: 'GET'
@@ -379,7 +381,7 @@ export class VariableManager {
    * Read the current value of a variable by name
    * No registration required - builds NodeId dynamically
    */
-  public readValue(name: string): Promise<any> {
+  public readValue(name: string): Promise<OpcuaValue> {
     return this.createSmartPromise(
       () => this.performReadValue(name),
       name
@@ -389,7 +391,7 @@ export class VariableManager {
   /**
    * Internal method that performs the actual read operation
    */
-  private async performReadValue(name: string): Promise<any> {
+  private async performReadValue(name: string): Promise<OpcuaValue> {
     const normalizedName = this.normalizeVariableName(name);
     
     // Try to get nodeId from registered variable first
@@ -663,6 +665,7 @@ export class VariableManager {
       // Check results and handle any failures
       if (Array.isArray(results.responses)) {
         const failures: string[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any        
         results.responses.forEach((result: any, index: number) => {
           if (result.status >= 400 || (result.body && result.body.status?.code !== 0)) {
             const errorMsg = result.body?.status?.code?.description || result.statusText || 'Unknown error';

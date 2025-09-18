@@ -73,6 +73,21 @@ export interface MonitoredItemOptions {
 }
 
 /**
+ * OPC UA Data Notification structure from WebSocket messages
+ * Represents a single data change notification from the server
+ */
+export interface DataNotification {
+  clientHandle: number;
+  value: OpcuaValue;
+  serverTimestamp?: string;
+  sourceTimestamp?: string;
+  status?: {
+    code: number;
+    symbol?: string;
+  };
+}
+
+/**
  * Connection configuration for mapp Connect
  */
 export interface ConnectionConfig {
@@ -102,14 +117,17 @@ export interface SessionInfo {
   roles?: string[];                    // Optional user roles from mapp Connect
 }
 
-// Session request interface for mapp Connect API
+export interface UserCredentials {
+  username?: string;
+  password?: string;
+}
+/**
+ * Session request interface for mapp Connect API
+ */
 export interface SessionRequest {
   url: string;
   timeout: number;
-  userIdentityToken?: {
-    username: string;
-    password: string;
-  };
+  userIdentityToken?: UserCredentials;
 }
 
 /**
