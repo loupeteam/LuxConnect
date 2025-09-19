@@ -38,7 +38,34 @@ describe('Subscription Consolidation Logic', () => {
         });
       }
       
-      if (url.includes('/monitoredItems') && options?.method === 'POST') {
+      // Handle batch operations for monitored items
+      if (url.includes('/monitoredItems/$batch') && options?.method === 'POST') {
+        const batchBody = JSON.parse(options.body);
+        const responses = batchBody.requests.map((req: any, index: number) => {
+          if (req.method === 'POST') {
+            return {
+              id: req.id,
+              body: {
+                monitoredItemId: Math.floor(Math.random() * 1000) + 1000 + index,
+                clientHandle: req.body?.monitoringParameters?.clientHandle || (2000 + index)
+              }
+            };
+          } else if (req.method === 'DELETE') {
+            return {
+              id: req.id,
+              body: { success: true }
+            };
+          }
+          return { id: req.id, body: {} };
+        });
+        
+        return Promise.resolve({
+          json: () => Promise.resolve({ responses })
+        });
+      }
+      
+      // Fallback for individual operations (should not be used anymore)
+      if (url.includes('/monitoredItems') && !url.includes('$batch') && options?.method === 'POST') {
         const result = {
           monitoredItemId: Math.floor(Math.random() * 1000) + 1000,
           clientHandle: Math.floor(Math.random() * 1000) + 2000
@@ -48,7 +75,7 @@ describe('Subscription Consolidation Logic', () => {
         });
       }
       
-      if (url.includes('/monitoredItems') && options?.method === 'DELETE') {
+      if (url.includes('/monitoredItems') && !url.includes('$batch') && options?.method === 'DELETE') {
         return Promise.resolve({
           json: () => Promise.resolve({ success: true })
         });
@@ -80,10 +107,13 @@ describe('Subscription Consolidation Logic', () => {
     // Check that the monitored item is removed
     expect(subscription?.monitoredItems.size).toBe(0);
     
-    // Verify DELETE was called
+    // Verify batch DELETE was called
     expect(mockApiRequest).toHaveBeenCalledWith(
-      expect.stringContaining('/monitoredItems/'),
-      expect.objectContaining({ method: 'DELETE' })
+      expect.stringContaining('/monitoredItems/$batch'),
+      expect.objectContaining({ 
+        method: 'POST',
+        body: expect.stringContaining('"method":"DELETE"')
+      })
     );
   });
 
@@ -105,10 +135,12 @@ describe('Subscription Consolidation Logic', () => {
     // Should have no monitored items left
     expect(subscription?.monitoredItems.size).toBe(0);
     
-    // Should have called DELETE twice
-    const deleteRequests = mockApiRequest.mock.calls.filter((call: any) => 
-      call[1]?.method === 'DELETE' && call[0].includes('/monitoredItems/')
+    // Should have called batch DELETE twice (once for each removeVariable call)
+    const batchDeleteRequests = mockApiRequest.mock.calls.filter((call: any) => 
+      call[1]?.method === 'POST' && 
+      call[0].includes('/monitoredItems/$batch') &&
+      call[1]?.body?.includes('"method":"DELETE"')
     );
-    expect(deleteRequests.length).toBe(2);
+    expect(batchDeleteRequests.length).toBe(2);
   });
 });

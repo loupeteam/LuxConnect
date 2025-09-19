@@ -130,6 +130,50 @@ export class SubscriptionManager {
   }
 
   /**
+   * Add multiple variables to a subscription efficiently
+   * This is more efficient than calling addVariable multiple times as it
+   * consolidates the subscription only once after adding all variables
+   */
+  public async addVariables(
+    subscriptionName: string, 
+    variableNames: string[], 
+    options: MonitoredItemOptions = {}
+  ): Promise<void> {
+    const subscription = this.subscriptions.get(subscriptionName);
+    if (!subscription) {
+      throw new Error(`Subscription '${subscriptionName}' not found`);
+    }
+
+    // Validate all variables exist before adding any
+    for (const variableName of variableNames) {
+      const variable = this.variableManager.getVariable(variableName);
+      if (!variable) {
+        throw new Error(`Variable '${variableName}' is not registered`);
+      }
+    }
+
+    // Filter out variables that are already desired
+    const newVariables = variableNames.filter(varName => !subscription.desiredVariables.has(varName));
+    
+    if (newVariables.length === 0) {
+      return; // All variables already added
+    }
+
+    // Warn about samplingInterval mismatches
+    if (options.samplingInterval && options.samplingInterval !== subscription.parameters.publishingInterval) {
+      console.warn(`Warning: Variables samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
+    }
+
+    // Add all variables to desired set
+    for (const variableName of newVariables) {
+      subscription.desiredVariables.add(variableName);
+    }
+
+    // Consolidate once after adding all variables (this triggers batching)
+    await this.consolidateSubscription(subscription);
+  }
+
+  /**
    * Add a variable to a subscription by variable name (lux.js style)
    * Handles hierarchical relationships and prevents duplicates
    * 
@@ -194,9 +238,10 @@ export class SubscriptionManager {
    * - Avoid duplicate subscriptions
    * 
    * Each subscription maintains its own variable list for proper isolation,
-   * but leverages VariableManager for consistent parsing
+   * but leverages VariableManager for consistent parsing.
+   * This method is exposed publicly to allow external batch updates to subscriptions.
    */
-  private async consolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
+  public async consolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
     // Build hierarchy map for THIS subscription's variables only
     const subscriptionHierarchy = new Map<string, { nodeId: string; path: string[] }>();
 
@@ -227,19 +272,12 @@ export class SubscriptionManager {
     const toAdd = Array.from(consolidatedNodeIds).filter(nodeId => !currentlyMonitored.has(nodeId));
     const toRemove = Array.from(currentlyMonitored).filter(nodeId => !consolidatedNodeIds.has(nodeId));
 
-    // Use batch operations for efficiency when dealing with multiple items
-    if (toRemove.length > 1) {
-      // Batch remove multiple monitored items
+    // Always use batch operations for consistency and simplicity
+    if (toRemove.length > 0) {
       await this.removeMultipleMonitoredItems(subscription, toRemove);
-    } else {
-      // Remove obsolete monitored items individually
-      for (const nodeId of toRemove) {
-        await this.removeMonitoredItemByNodeId(subscription, nodeId);
-      }
     }
 
-    if (toAdd.length > 1) {
-      // Batch add multiple monitored items
+    if (toAdd.length > 0) {
       const batchItems = toAdd.map(nodeId => {
         const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
         return {
@@ -249,13 +287,6 @@ export class SubscriptionManager {
         };
       });
       await this.addMultipleMonitoredItems(subscription, batchItems);
-    } else {
-      // Add new monitored items individually
-      for (const nodeId of toAdd) {
-        // Find the variable name for this nodeId
-        const varName = this.findVariableNameByNodeId(nodeId, subscriptionHierarchy);
-        await this.addMonitoredItem(subscription, nodeId, {}, varName);
-      }
     }
   }
 
@@ -399,19 +430,6 @@ export class SubscriptionManager {
       }
     }
     return undefined;
-  }
-
-  /**
-   * Remove monitored item by nodeId
-   */
-  private async removeMonitoredItemByNodeId(subscription: SubscriptionInfo, nodeId: string): Promise<void> {
-    // Find the monitored item with this nodeId
-    for (const [, monitoredItem] of subscription.monitoredItems) {
-      if (monitoredItem.nodeId === nodeId) {
-        await this.removeMonitoredItem(subscription, nodeId);
-        break;
-      }
-    }
   }
 
   /**
@@ -624,13 +642,15 @@ export class SubscriptionManager {
         }
       }));
 
+      const batchBody = {
+        requests: batchRequests
+      };
+
       const response = await this.connection.apiRequest(
         `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/$batch`, 
         {
           method: 'POST',
-          body: JSON.stringify({
-            requests: batchRequests
-          })
+          body: JSON.stringify(batchBody)
         }
       );
 
@@ -645,7 +665,7 @@ export class SubscriptionManager {
           if (response.body && response.body.monitoredItemId) {
             const monitoredItemInfo: MonitoredItemInfo = {
               monitoredItemId: response.body.monitoredItemId,
-              clientHandle: originalItem._metadata.clientHandle,
+              clientHandle: originalItem._metadata.clientHandle,  // Use our generated clientHandle
               nodeId: originalItem._metadata.nodeId,
               ...(originalItem._metadata.variableName && { variableName: originalItem._metadata.variableName })
             };

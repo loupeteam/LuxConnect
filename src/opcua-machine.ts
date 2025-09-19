@@ -667,16 +667,16 @@ export class OpcuaMachine {
   }
 
   private async createOrUpdateSubscription(readGroupName: string): Promise<void> {
-    // Debounce subscription updates to avoid race conditions
+    // Debounce subscription so that multiple calls in the same event loop tick are batched
     const existingTimer = this.subscriptionUpdateTimers.get(readGroupName);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      return; // Update already scheduled
     }
 
     const timer = setTimeout(async () => {
       this.subscriptionUpdateTimers.delete(readGroupName);
       await this.doCreateOrUpdateSubscription(readGroupName);
-    }, 100); // 100ms debounce
+    }, 0); //Add a 0 delay to batch multiple calls in the same event loop tick
 
     this.subscriptionUpdateTimers.set(readGroupName, timer);
   }
@@ -688,15 +688,6 @@ export class OpcuaMachine {
     }
 
     try {
-      // Delete existing subscription if it exists
-      if (group.subscriptionId !== null) {
-        await this.deleteSubscription(readGroupName);
-      }
-
-      // All variables should already be registered from initCyclicRead calls
-      // No need to check pendingVariables since registration happens immediately
-
-      // Create subscription via SubscriptionManager
       const subscriptionOptions = {
         publishingInterval: group.options.publishingInterval || 1000,
         maxNotificationsPerPublish: group.options.maxNotificationsPerPublish || 10,
@@ -705,17 +696,37 @@ export class OpcuaMachine {
         maxKeepAliveCount: 10
       };
 
-      const subscriptionName = await this.subscriptionManager.createOrUpdateSubscription(readGroupName, subscriptionOptions);
-      const subscriptionInfo = this.subscriptionManager.getSubscription(subscriptionName);
-      group.subscriptionId = subscriptionInfo?.subscriptionId || null;
+      const variablesToAdd = Array.from(group.variables);
+      const existingSubscription = this.subscriptionManager.getSubscription(readGroupName);
 
-      // Add all variables to the subscription
-      for (const varName of group.variables) {
-        try {
-          await this.subscriptionManager.addVariable(readGroupName, varName);
-        } catch (error) {
-          console.warn(`Failed to add variable ${varName} to subscription:`, error);
+      if (existingSubscription) {
+        // Update existing subscription by setting desired variables and consolidating
+        console.log(`Updating existing subscription '${readGroupName}' from ${existingSubscription.desiredVariables.size} to ${variablesToAdd.length} variables`);
+        
+        // Clear current desired variables and set new ones
+        existingSubscription.desiredVariables.clear();
+        for (const varName of variablesToAdd) {
+          existingSubscription.desiredVariables.add(varName);
         }
+        
+        // Trigger consolidation which will efficiently add/remove monitored items using batching
+        await this.subscriptionManager.consolidateSubscription(existingSubscription);
+        
+        group.subscriptionId = existingSubscription.subscriptionId;
+        console.log(`✅ Subscription '${readGroupName}' updated with ${variablesToAdd.length} variables`);
+      } else {
+        // Create new subscription
+        console.log(`Creating new subscription '${readGroupName}' with ${variablesToAdd.length} variables`);
+        
+        // Create empty subscription first
+        await this.subscriptionManager.createSubscription(readGroupName, subscriptionOptions);
+        
+        // Add all variables efficiently using the new batch method
+        await this.subscriptionManager.addVariables(readGroupName, variablesToAdd);
+        
+        const subscriptionInfo = this.subscriptionManager.getSubscription(readGroupName);
+        group.subscriptionId = subscriptionInfo?.subscriptionId || null;
+        console.log(`✅ Subscription '${readGroupName}' created with ${variablesToAdd.length} variables`);
       }
     } catch (error) {
       console.error(`Failed to create/update subscription '${readGroupName}':`, error);

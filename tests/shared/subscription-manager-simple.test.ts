@@ -62,7 +62,36 @@ describe('SubscriptionManager - Simple Tests', () => {
     
     // Set up API responses for subscription creation
     mockConnection.apiRequest.mockImplementation((url: string, options: any) => {
-      if (url.includes('/monitoredItems') && options?.method === 'POST') {
+      // Handle batch operations for monitored items
+      if (url.includes('/monitoredItems/$batch') && options?.method === 'POST') {
+        const body = JSON.parse(options.body);
+        const responses = body.requests.map((req: any, index: number) => {
+          if (req.method === 'POST') {
+            return {
+              id: req.id,
+              body: {
+                monitoredItemId: 456 + index,
+                clientHandle: 789 + index
+              }
+            };
+          } else if (req.method === 'DELETE') {
+            return {
+              id: req.id,
+              body: { success: true }
+            };
+          }
+          return { id: req.id, body: {} };
+        });
+        
+        return Promise.resolve({
+          json: vi.fn().mockResolvedValue({
+            responses: responses
+          })
+        });
+      }
+      
+      // Individual monitored item operations (fallback - should not be used anymore)
+      if (url.includes('/monitoredItems') && !url.includes('$batch') && options?.method === 'POST') {
         return Promise.resolve({
           json: vi.fn().mockResolvedValue({
             monitoredItemId: 456,
@@ -71,7 +100,7 @@ describe('SubscriptionManager - Simple Tests', () => {
         });
       }
       
-      if (url.includes('/monitoredItems') && options?.method === 'DELETE') {
+      if (url.includes('/monitoredItems') && !url.includes('$batch') && options?.method === 'DELETE') {
         return Promise.resolve({
           json: vi.fn().mockResolvedValue({ success: true })
         });
@@ -134,10 +163,13 @@ describe('SubscriptionManager - Simple Tests', () => {
       await subscriptionManager.addVariable('TestSub', 'Temperature');
       await subscriptionManager.removeVariable('TestSub', 'Temperature');
       
-      // Should call DELETE on monitored item
+      // Should call batch DELETE on monitored items
       expect(mockConnection.apiRequest).toHaveBeenCalledWith(
-        expect.stringContaining('/monitoredItems/456'),
-        expect.objectContaining({ method: 'DELETE' })
+        expect.stringContaining('/monitoredItems/$batch'),
+        expect.objectContaining({ 
+          method: 'POST',
+          body: expect.stringContaining('"method":"DELETE"')
+        })
       );
     });
 

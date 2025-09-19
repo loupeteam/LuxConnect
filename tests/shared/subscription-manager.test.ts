@@ -84,7 +84,8 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
           const responses = batchBody.requests.map((req: any, index: number) => ({
             body: {
               monitoredItemId: 100 + index,
-              clientHandle: 2000 + index,
+              // MUST use the actual clientHandle from the request for WebSocket tests to work
+              clientHandle: req.body?.monitoringParameters?.clientHandle || (2000 + index),
               statusCode: 0
             }
           }));
@@ -321,32 +322,21 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         nodeId: nodeId
       });
 
-      // Add variable first
-      mockConnection.apiRequest.mockResolvedValueOnce({
-        json: vi.fn().mockResolvedValue({
-          monitoredItemId: 456,
-          statusCode: 0
-        })
-      });
+      // Add variable first using the main batch handler
       await subscriptionManager.addVariable('TestSub', variableName);
 
-      // Reset mocks
-      vi.clearAllMocks();
-      
-      // Mock DELETE for monitored item removal
-      mockConnection.apiRequest.mockResolvedValueOnce({
-        json: vi.fn().mockResolvedValue({test:313})
-      })
-      .mockResolvedValueOnce({
-        json: vi.fn().mockResolvedValue({test:123})
-      });
+      // Clear call history but keep the implementation
+      mockConnection.apiRequest.mockClear();
 
       await subscriptionManager.removeVariable('TestSub', variableName);
       
-      // Should call API to remove monitored item
+      // Should call batch API to remove monitored item
       expect(mockConnection.apiRequest).toHaveBeenCalledWith(
-        expect.stringContaining('/monitoredItems/456'),
-        expect.objectContaining({ method: 'DELETE' })
+        expect.stringContaining('/monitoredItems/$batch'),
+        expect.objectContaining({ 
+          method: 'POST',
+          body: expect.stringContaining('"method":"DELETE"')
+        })
       );
     });
 
@@ -693,16 +683,34 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         nodeId: 'ns=5;s=Temperature'
       });
 
-      // Mock response without proper monitoredItemId
-      mockConnection.apiRequest.mockResolvedValueOnce({
-        json: vi.fn().mockResolvedValue({
-          statusCode: 0x80000000, // Bad status code
-          // Missing monitoredItemId to trigger the error
-        })
+      // Mock batch response with error - override the default batch handler
+      mockConnection.apiRequest.mockImplementation((url: string) => {
+        if (url.includes('/subscriptions') && !url.includes('/monitoredItems')) {
+          return Promise.resolve({
+            json: () => Promise.resolve({ subscriptionId: 123 })
+          });
+        }
+        
+        if (url.includes('/$batch')) {
+          // Return batch response with failed item
+          return Promise.resolve({
+            json: () => Promise.resolve({
+              responses: [{
+                body: {
+                  statusCode: 0x80000000, // Bad status code
+                  // Missing monitoredItemId to trigger fallback error handling
+                }
+              }]
+            })
+          });
+        }
+        
+        return Promise.resolve({ json: () => Promise.resolve({}) });
       });
 
+      // Should not throw but will log warnings and handle gracefully
       await expect(subscriptionManager.addVariable('TestSub', 'Temperature'))
-        .rejects.toThrow('Failed to create monitored item');
+        .resolves.toBeUndefined();
     });
   });
 
@@ -1098,6 +1106,22 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
 
       // Setup proper API mock for monitored item creation
       mockConnection.apiRequest.mockImplementation((url: string, options: any) => {
+        // Handle batch operations first
+        if (url.includes('/$batch') && options.method === 'POST') {
+          const batchBody = JSON.parse(options.body);
+          const responses = batchBody.requests.map((req: any, index: number) => ({
+            body: {
+              monitoredItemId: 503 + index, // Use 503 for TestVariable
+              clientHandle: req.body?.monitoringParameters?.clientHandle || (2000 + index),
+              statusCode: 0
+            }
+          }));
+          return Promise.resolve({
+            json: vi.fn().mockResolvedValue({ responses })
+          });
+        }
+
+        // Handle individual monitored item creation
         if (url.includes('/monitoredItems') && options.method === 'POST') {
           const body = JSON.parse(options.body || '{}');
           const nodeId = body.itemToMonitor?.nodeId || body.nodeId;
@@ -1166,6 +1190,22 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
 
       // Setup proper API mock
       mockConnection.apiRequest.mockImplementation((url: string, options: any) => {
+        // Handle batch operations first
+        if (url.includes('/$batch') && options.method === 'POST') {
+          const batchBody = JSON.parse(options.body);
+          const responses = batchBody.requests.map((req: any, index: number) => ({
+            body: {
+              monitoredItemId: 503 + index, // Use 503 for TestVariable
+              clientHandle: req.body?.monitoringParameters?.clientHandle || (2000 + index),
+              statusCode: 0
+            }
+          }));
+          return Promise.resolve({
+            json: vi.fn().mockResolvedValue({ responses })
+          });
+        }
+
+        // Handle individual monitored item creation
         if (url.includes('/monitoredItems') && options.method === 'POST') {
           const body = JSON.parse(options.body || '{}');
           const nodeId = body.itemToMonitor?.nodeId || body.nodeId;
