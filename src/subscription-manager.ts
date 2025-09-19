@@ -819,11 +819,38 @@ export class SubscriptionManager {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any    
     this.connection.onMessage((message: any) => {
       if (message && message.DataNotifications && Array.isArray(message.DataNotifications)) {
+        // Filter out stale messages from previous sessions
+        if (this.isStaleMessage(message)) {
+          console.debug(`🚫 Ignoring stale WebSocket message from session ${message.sessionId} (current: ${this.connection.getSessionInfo()?.sessionId})`);
+          return;
+        }
+        
         for (const dataNotification of message.DataNotifications) {
           this.handleDataNotification(dataNotification);
         }
       }
     });
+  }
+
+  /**
+   * Check if a WebSocket message is from a previous session
+   */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private isStaleMessage(message: any): boolean {
+    const currentSessionId = this.connection.getSessionInfo()?.sessionId;
+    const messageSessionId = message.sessionId;
+    
+    // If we can't determine session IDs, allow the message (fail safe)
+    if (!currentSessionId || messageSessionId === undefined) {
+      return false;
+    }
+    
+    // Convert to strings for comparison to handle both string and number session IDs
+    const currentId = String(currentSessionId);
+    const msgId = String(messageSessionId);
+    
+    // Return true if this message is from a different session (stale)
+    return currentId !== msgId;
   }
 
   /**
