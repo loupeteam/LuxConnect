@@ -104,6 +104,10 @@ export class SubscriptionManager {
     };
 
     this.subscriptions.set(name, subscriptionInfo);
+    
+    // Register the subscription ID with the connection for orphaned subscription cleanup
+    this.connection.registerSubscription(result.subscriptionId);
+    
     return name;
   }
 
@@ -125,6 +129,9 @@ export class SubscriptionManager {
     await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}`, {
       method: 'DELETE'
     });
+
+    // Unregister the subscription ID from the connection
+    this.connection.unregisterSubscription(subscription.subscriptionId);
 
     this.subscriptions.delete(name);
   }

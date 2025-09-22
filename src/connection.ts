@@ -185,6 +185,12 @@ export class OpcuaConnection {
   
   // Cookie jar for Node.js (browsers handle cookies automatically)
   private cookies: Map<string, string> = new Map();
+  
+  // Session persistence keys
+  private static readonly SESSION_STORAGE_KEY = 'opcua_session_info';
+  
+  // Subscription tracking for orphaned cleanup
+  private knownSubscriptionIds = new Set<number>();
 
   constructor(config: ConnectionConfig) {
     this.config = {
@@ -202,6 +208,207 @@ export class OpcuaConnection {
   }
 
   /**
+   * Save session info to localStorage for persistence across page refreshes
+   */
+  private saveSessionToStorage(): void {
+    if (typeof localStorage === 'undefined' || !this.sessionInfo) return;
+    
+    try {
+      const sessionData = {
+        sessionInfo: this.sessionInfo,
+        cookies: Array.from(this.cookies.entries()),
+        timestamp: Date.now()
+      };
+      
+      localStorage.setItem(OpcuaConnection.SESSION_STORAGE_KEY, JSON.stringify(sessionData));
+      console.log('💾 Session saved to localStorage:', { 
+        sessionId: this.sessionInfo?.sessionId, 
+        cookieCount: this.cookies.size 
+      });
+    } catch (error) {
+      console.warn('Failed to save session to localStorage:', error);
+    }
+  }
+
+  /**
+   * Try to restore session from localStorage
+   */
+  private tryRestoreSession(): boolean {
+    if (typeof localStorage === 'undefined') return false;
+    
+    try {
+      const stored = localStorage.getItem(OpcuaConnection.SESSION_STORAGE_KEY);
+      if (!stored) return false;
+      
+      const sessionData = JSON.parse(stored);
+      const age = Date.now() - (sessionData.timestamp || 0);
+      
+      // Don't use sessions older than 25 minutes (sessions typically timeout at 30min)
+      if (age > 25 * 60 * 1000) {
+        console.log('🗑️ Stored session too old, discarding');
+        localStorage.removeItem(OpcuaConnection.SESSION_STORAGE_KEY);
+        return false;
+      }
+      
+      this.sessionInfo = sessionData.sessionInfo;
+      this.cookies.clear();
+      if (sessionData.cookies) {
+        for (const [key, value] of sessionData.cookies) {
+          this.cookies.set(key, value);
+        }
+      }
+      
+      console.log('🔄 Restored session from localStorage:', { 
+        sessionId: this.sessionInfo?.sessionId, 
+        age: Math.round(age / 1000) + 's',
+        cookieCount: this.cookies.size
+      });
+      return true;
+    } catch (error) {
+      console.warn('Failed to restore session from localStorage:', error);
+      localStorage.removeItem(OpcuaConnection.SESSION_STORAGE_KEY);
+      return false;
+    }
+  }
+
+  /**
+   * Clear stored session from localStorage
+   */
+  private clearStoredSession(): void {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(OpcuaConnection.SESSION_STORAGE_KEY);
+    }
+  }
+
+  /**
+   * Validate restored session and clean up any existing subscriptions
+   */
+  private async validateAndCleanSession(): Promise<boolean> {
+    if (!this.sessionInfo) return false;
+    
+    try {
+      // Test if session is still valid by making a simple API call
+      const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}`;
+      
+      console.log('🔍 Validating restored session:', this.sessionInfo.sessionId);
+      
+      const response = await this.fetchWithCookies(sessionUrl, {
+        method: 'GET',
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Session validation failed: ${response.status}`);
+      }
+      
+      const sessionData = await response.json();
+      console.log('✅ Session is valid, cleaning up subscriptions...');
+      
+      // Clean up any existing subscriptions from previous page load
+      await this.cleanupExistingSubscriptions();
+      
+      console.log('✅ Session restored and cleaned:', {
+        sessionId: this.sessionInfo.sessionId,
+        username: sessionData.username || this.sessionInfo.username
+      });
+      
+      return true;
+    } catch (error) {
+      console.log('❌ Session validation failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clean up any existing subscriptions for this session
+   */
+  private async cleanupExistingSubscriptions(): Promise<void> {
+    if (!this.sessionInfo) return;
+    
+    console.log('🧹 Setting up subscription cleanup on WebSocket messages...');
+    
+    // Instead of trying to list subscriptions (which may not be supported),
+    // we'll track orphaned subscription IDs from WebSocket messages and clean them up
+    this.setupOrphanedSubscriptionCleanup();
+  }
+
+  /**
+   * Set up cleanup for orphaned subscriptions detected via WebSocket messages
+   */
+  private setupOrphanedSubscriptionCleanup(): void {
+    const orphanedSubscriptions = new Set<number>();
+    
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.onMessage((message: any) => {
+      // Check if this message has subscription data from our current session
+      // Convert both to strings for comparison since sessionId can be number or string
+      if (message && 
+          String(message.sessionId) === String(this.sessionInfo?.sessionId) && 
+          message.subscriptionId && 
+          message.DataNotifications) {
+        
+        const subscriptionId = Number(message.subscriptionId);
+        
+        // Check if this subscription ID is known to our SubscriptionManager
+        // If not, it's probably orphaned from a previous page load
+        if (!this.isKnownSubscription(subscriptionId)) {
+          orphanedSubscriptions.add(subscriptionId);
+          
+          // Clean up this orphaned subscription
+          this.cleanupOrphanedSubscription(subscriptionId)
+            .catch(error => {
+              console.warn(`Failed to clean up orphaned subscription ${subscriptionId}:`, error);
+            });
+        }
+      }
+    });
+  }
+
+  /**
+   * Check if a subscription ID is known to our current SubscriptionManager
+   */
+  private isKnownSubscription(subscriptionId: number): boolean {
+    return this.knownSubscriptionIds.has(subscriptionId);
+  }
+
+  /**
+   * Method for SubscriptionManager to register new subscriptions
+   */
+  registerSubscription(subscriptionId: number): void {
+    this.knownSubscriptionIds.add(subscriptionId);
+  }
+
+  /**
+   * Method for SubscriptionManager to unregister removed subscriptions
+   */
+  unregisterSubscription(subscriptionId: number): void {
+    this.knownSubscriptionIds.delete(subscriptionId);
+  }
+
+  /**
+   * Clean up a specific orphaned subscription
+   */
+  private async cleanupOrphanedSubscription(subscriptionId: number): Promise<void> {
+    if (!this.sessionInfo) return;
+    
+    try {
+      const deleteUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}/subscriptions/${subscriptionId}`;
+      
+      console.log(`🗑️ Cleaning up orphaned subscription ${subscriptionId}`);
+      
+      await this.fetchWithCookies(deleteUrl, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      
+      console.log(`✅ Successfully cleaned up orphaned subscription ${subscriptionId}`);
+    } catch (error) {
+      console.warn(`Failed to clean up subscription ${subscriptionId}:`, error);
+      // Don't throw - this is cleanup, not critical for operation
+    }
+  }
+
+  /**
    * Connect to the OPC UA server
    */
   public async connect(): Promise<void> {
@@ -211,8 +418,23 @@ export class OpcuaConnection {
       // Test certificate (optional step)
       await this.testCertificate();
 
-      // Create session
-      await this.createSession();
+      // Try to restore existing session first
+      let sessionRestored = false;
+      if (this.tryRestoreSession()) {
+        try {
+          sessionRestored = await this.validateAndCleanSession();
+        } catch (error) {
+          console.log('🚫 Session validation failed, creating new session:', error);
+          this.clearStoredSession();
+          sessionRestored = false;
+        }
+      }
+      
+      // Create new session if restoration failed
+      if (!sessionRestored) {
+        await this.createSession();
+        this.saveSessionToStorage();
+      }
 
       // Start session keep-alive
       this.startSessionKeepAlive();
@@ -263,6 +485,7 @@ export class OpcuaConnection {
     }
 
     this.sessionInfo = null;
+    this.clearStoredSession(); // Clear localStorage when disconnecting
     this.setState(ConnectionState.DISCONNECTED);
   }
 
@@ -719,6 +942,9 @@ Original error: ${originalMessage}`);
       timeout: this.sessionInfo.sessionTimeout,
       endpointUrl: this.sessionInfo.endpointUrl
     });
+    
+    // Save session to localStorage for persistence
+    this.saveSessionToStorage();
   }
 
   /**
@@ -853,6 +1079,9 @@ Original error: ${originalMessage}`);
               username: this.sessionInfo.username,
               endpointUrl: this.sessionInfo.endpointUrl
             });
+            
+            // Save session to localStorage for persistence
+            this.saveSessionToStorage();
             return; // Success!
           }
           
@@ -885,6 +1114,9 @@ Auth data: ${JSON.stringify(authData)}`);
         username: this.sessionInfo.username,
         endpointUrl: this.sessionInfo.endpointUrl
       });
+      
+      // Save session to localStorage for persistence
+      this.saveSessionToStorage();
       
     } catch (error) {
       console.warn(`mapp Connect session creation error:`, error);
