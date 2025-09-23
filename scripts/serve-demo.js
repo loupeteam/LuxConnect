@@ -58,6 +58,12 @@ function serveFile(filePath, response) {
 const server = http.createServer((request, response) => {
     let filePath = path.join(projectRoot, request.url);
     
+    // Serve node_modules files for dependencies
+    if (request.url.startsWith('/node_modules/')) {
+        // Allow serving specific packages from node_modules
+        filePath = path.join(projectRoot, request.url);
+    }
+    
     // Proxy OPC UA requests to avoid CORS issues
     if (request.url.startsWith('/opcua/')) {
         proxyToOpcuaServer(request, response);

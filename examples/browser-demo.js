@@ -1,6 +1,20 @@
-import { OpcuaMachine } from '../dist/index.js';
+import { OpcuaMachine, initializeLuxCompatibility } from '../dist/index.js';
 
 let machine = null;
+
+// Initialize LUX compatibility when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof LUX !== 'undefined') {
+        log(`✅ LUX core loaded (version: ${LUX.version})`);
+        if (LUX.dataBindVersion) {
+            log(`✅ LUX data-bind loaded (version: ${LUX.dataBindVersion})`);
+        } else {
+            log('⚠️ LUX data-bind not loaded');
+        }
+    } else {
+        log('❌ LUX not loaded - data binding will not work');
+    }
+});
 
 function log(message) {
     const logElement = document.getElementById('log');
@@ -232,6 +246,15 @@ window.connect = async function () {
         await machine.connect();
 
         log('✅ Connected successfully!');
+        
+        // Initialize LUX compatibility layer
+        log('🔄 Setting up LUX compatibility...');
+        initializeLuxCompatibility(machine, 'machine');
+        log('✅ LUX compatibility initialized - lux-data-bind.js is ready');
+        
+        // Enable the LUX data binding test elements
+        enableLuxDataBinding();
+        
         updateSessionDisplay(); // Update session info after successful connection
         window.machine = machine; // Expose for debugging in browser console
 
@@ -997,6 +1020,39 @@ function initializeDemo() {
             machine.setReadGroupEnable('default', true);
         }
     }, 2000); // Wait 2 seconds after connection
+}
+
+function enableLuxDataBinding() {
+    if (!window.LUX) {
+        console.error('LUX is not available - cannot enable data binding');
+        return;
+    }
+
+    console.log('🔄 Enabling LUX data binding test elements...');
+    console.log('Available LUX functions:', Object.keys(window.LUX));
+    
+    // Show the test elements container
+    const testContainer = document.getElementById('luxTestElements');
+    if (testContainer) {
+        testContainer.style.display = 'block';
+        console.log('✅ Test elements container is now visible');
+    }
+    
+    // Try different ways to start data binding
+    if (window.LUX.startDataBinding) {
+        window.LUX.startDataBinding();
+        console.log('✅ LUX.startDataBinding() called');
+    } else if (window.LUX.init) {
+        window.LUX.init();
+        console.log('✅ LUX.init() called instead');
+    } else if (window.LUX.refresh) {
+        window.LUX.refresh();
+        console.log('✅ LUX.refresh() called instead');
+    } else {
+        setInterval(LUX.updateHMI, 100)
+        // console.log('ℹ️ No explicit start function needed - data binding should work automatically');
+        // console.log('🔍 LUX object contents:', window.LUX);
+    }
 }
 
 // Initialize when DOM is loaded

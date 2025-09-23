@@ -73,5 +73,14 @@ export function createOpcuaMachine(config: ConnectionConfig): OpcuaMachine {
   return new OpcuaMachine(config);
 }
 
+// LUX Compatibility Layer
+export { 
+    initializeLuxCompatibility,
+    registerMachine,
+    createLuxCompatibleMachine,
+    setupMinimalLux
+} from './lux-compatibility.js';
+export type { LuxCompatibleMachine } from './lux-compatibility.js';
+
 // Version information
 export const VERSION = '1.0.0';

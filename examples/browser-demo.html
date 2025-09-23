@@ -161,6 +161,33 @@
             font-style: italic;
             color: #6c757d;
         }
+        .results {
+            margin-top: 10px; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+            background-color: #f9f9f9;
+        }
+        .lux-test-container {
+            display: none;
+            margin-top: 20px;
+        }
+        .lux-test-demo {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        .lux-led {
+            font-size: 20px;
+            margin: 0 5px;
+        }
+        .led-on {
+            color: #28a745;
+        }
+        .led-off {
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -283,7 +310,7 @@
             <button id="testWithUserCatchBtn" onclick="testWithUserCatch()" disabled>Test with User .catch()</button>
         </div>
         
-        <div id="errorTestResults" class="results" style="margin-top: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f9f9f9;"></div>
+        <div id="errorTestResults" class="results"></div>
 
         <h2>Variables</h2>
         <div class="controls">
@@ -298,11 +325,42 @@
             <p>No variables configured</p>
         </div>
 
+        <h2>🔗 LUX Data Binding Test</h2>
+        <p>These elements demonstrate LUX data binding working with the OPC UA library:</p>
+        
+        <div class="controls">
+            <button id="enableDataBindingBtn" onclick="enableDataBinding()" disabled>Enable Data Binding Test</button>
+        </div>
+        
+        <div id="luxTestElements" class="lux-test-container">
+            <div class="lux-test-demo">
+                <h4>Temperature Variable (::test:test._real)</h4>
+                <p><strong>Current Value:</strong> <span class="lux-value" data-var-name="test:test._real">-</span> °C</p>
+                <p><strong>Status LED:</strong> <span class="lux-led" data-var-name="test:test._real" data-set-value="100" data-reset-value="0">●</span> (Green when = 100)</p>
+                <p><strong>Input Control:</strong> <input type="number" class="lux-num-value" data-var-name="test:test._real" step="0.1" placeholder="Enter temperature" /></p>
+                <p><strong>Toggle Button:</strong> <button class="lux-btn-toggle lux-led" data-var-name="test:test._bool" data-set-value="true" data-reset-value="false">Toggle Boolean</button></p>
+            </div>
+        </div>
+
+        <div class="lux-btn-toggle" data-var-name="test:test.command">
+            my command
+        </div>
+
         <h2>Log</h2>
         <pre id="log" class="log"></pre>
     </div>
 
-    <!-- Use ES modules for modern browsers -->
+    <!-- Load jQuery first (required by lux-data-bind.js) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- Load LUX core library first -->
+    <script src="/node_modules/@loupeteam/loupe-ux/lux.js"></script>
+    <!-- Load LUX data-bind library (requires LUX core) -->
+    <script src="/node_modules/@loupeteam/loupe-ux/lux-data-bind.js"></script>
+    <!-- Optional: Also load the CSS if available -->
+    <link rel="stylesheet" href="/node_modules/@loupeteam/loupe-ux/lux.css">
+
+    <!-- Use ES modules for modern browsers - loaded after LUX libraries -->
     <script type="module" src="examples/browser-demo.js"></script>
 </body>
 </html>

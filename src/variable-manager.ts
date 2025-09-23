@@ -757,13 +757,16 @@ export class VariableManager {
   }
 
   /**
-   * Write a single value by nodeId
+   * Write a single value by nodeId with intelligent type conversion
    */
   private async writeSingleValueByNodeId(nodeId: string, value: OpcuaValue): Promise<void> {
+    // Simple string-to-boolean conversion
+    const convertedValue = this.convertValueForWrite(value);
+    
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/Value`, {
       method: 'PUT',
       body: JSON.stringify({
-        value: value
+        value: convertedValue
       })
     });
 
@@ -772,6 +775,22 @@ export class VariableManager {
     if (result.status?.code !== 0) {
       throw new Error(`Failed to write value: ${result.status?.code?.description || 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Convert value for writing - simple string-to-boolean conversion
+   */
+  private convertValueForWrite(value: OpcuaValue): OpcuaValue {
+    // Convert string "true"/"false" to boolean true/false
+    if (value === 'true' || value === 'TRUE') {
+      return true;
+    }
+    if (value === 'false' || value === 'FALSE') {
+      return false;
+    }
+    
+    // Return all other values as-is
+    return value;
   }
 
   /**

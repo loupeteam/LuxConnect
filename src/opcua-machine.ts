@@ -343,6 +343,10 @@ export class OpcuaMachine {
     await this.variableManager.writeValue(varName, value);
   }
 
+  public value(varName: string): OpcuaValue {
+    return this.getFromGlobalState(varName);
+  }
+
   /**
    * Set default namespace for variables
    */
@@ -487,7 +491,7 @@ export class OpcuaMachine {
    */
   public getFromGlobalState(path: string): OpcuaValue {
     const globalState = this.variableManager.getGlobalState();
-    const pathComponents = path.split('.');
+    const pathComponents = path.replace(":",".").split('.');
     
     // If single component (e.g., "MyVar"), try intelligent lookup
     if (pathComponents.length === 1) {
@@ -516,13 +520,38 @@ export class OpcuaMachine {
       return undefined;
     }
     
-    // For multi-component paths, navigate directly
+    // For multi-component paths, navigate with scope checking
     let current = globalState;
-    for (const component of pathComponents) {
+    for (let i = 0; i < pathComponents.length; i++) {
+      const component = pathComponents[i];
+      
       if (current == null || typeof current !== 'object') {
         return undefined;
       }
-      current = current[component];
+      
+      // If we can navigate directly, do so
+      if (component in current) {
+        current = current[component];
+        continue;
+      }
+      
+      // If direct navigation fails, check if this component is a scope name in any app module
+      if (i === 0) { // First component might be a scope name
+        let found = false;
+        for (const appModule of Object.keys(globalState)) {
+          if (globalState[appModule] && component in globalState[appModule]) {
+            current = globalState[appModule][component];
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return undefined;
+        }
+      } else {
+        // For subsequent components, navigate normally
+        current = current[component];
+      }
     }
     
     return current;
