@@ -70,6 +70,8 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
       onConnectionStateChanged: vi.fn(),
       onError: vi.fn(),
       getSessionInfo: vi.fn().mockReturnValue({ sessionId: 'mock-session-id' }),
+      registerSubscription: vi.fn(),
+      unregisterSubscription: vi.fn(),
       apiRequest: vi.fn().mockImplementation((url: string, options: any) => {
         // Mock subscription creation
         if (url.includes('/subscriptions') && !url.includes('/monitoredItems') && options?.method === 'POST') {

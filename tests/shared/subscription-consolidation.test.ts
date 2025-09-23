@@ -8,6 +8,8 @@ const mockConnection = {
   setWebSocketHandler: vi.fn(),
   onConnectionStateChanged: vi.fn(),
   getSessionInfo: vi.fn(() => ({ sessionId: 'test-session-123' })),
+  registerSubscription: vi.fn(),
+  unregisterSubscription: vi.fn(),
 };
 
 const mockVariableManager = {
