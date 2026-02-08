@@ -202,7 +202,7 @@ export class OpcuaConnection {
     
     const protocol = this.config.protocol || 'http';
     const port = this.config.port || (protocol === 'https' ? 443 : 80);
-    this.baseUrl = `${protocol}://${this.config.host}:${port}`;
+    this.baseUrl = `${protocol}://${this.config.host}:${port}/api/1.0`;
     
     console.log(`mapp Connect: Base URL = ${this.baseUrl}`);
   }
@@ -288,7 +288,7 @@ export class OpcuaConnection {
     
     try {
       // Test if session is still valid by making a simple API call
-      const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}`;
+      const sessionUrl = `${this.baseUrl}/opcua/sessions/${this.sessionInfo.sessionId}`;
       
       console.log('🔍 Validating restored session:', this.sessionInfo.sessionId);
       
@@ -392,7 +392,7 @@ export class OpcuaConnection {
     if (!this.sessionInfo) return;
     
     try {
-      const deleteUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}/subscriptions/${subscriptionId}`;
+      const deleteUrl = `${this.baseUrl}/opcua/sessions/${this.sessionInfo.sessionId}/subscriptions/${subscriptionId}`;
       
       console.log(`🗑️ Cleaning up orphaned subscription ${subscriptionId}`);
       
@@ -553,7 +553,7 @@ export class OpcuaConnection {
       );
     }
 
-    const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo.sessionId}`;
+    const sessionUrl = `${this.baseUrl}/opcua/sessions/${this.sessionInfo.sessionId}`;
     
     // Prepare user identity token
     let userIdentityToken: UserCredentials;
@@ -639,9 +639,8 @@ export class OpcuaConnection {
       );
     }
 
-    // Ensure endpoint starts with /api/1.0 for mapp Connect
-    const normalizedEndpoint = endpoint.startsWith('/api/1.0') ? endpoint : `/api/1.0${endpoint}`;
-    const url = `${this.baseUrl}${normalizedEndpoint}`;
+    // Construct full URL from base and endpoint
+    const url = `${this.baseUrl}${endpoint}`;
     
     try {
       const response = await this.fetchWithCookies(url, {
@@ -797,7 +796,7 @@ export class OpcuaConnection {
   private async testCertificate(): Promise<void> {
     console.log('Testing mapp Connect accessibility...');
     
-    const testUrl = `${this.baseUrl}/api/1.0/auth`;
+    const testUrl = `${this.baseUrl}/auth`;
     
     try {
       console.log(`Testing endpoint: ${testUrl}`);
@@ -902,7 +901,7 @@ Original error: ${originalMessage}`);
    * Create session directly (for anonymous access)
    */
   private async createSessionDirect(): Promise<void> {
-    const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
+    const sessionUrl = `${this.baseUrl}/opcua/sessions`;
     console.log(`Creating OPC UA session directly: ${sessionUrl}`);
 
     const sessionRequest: SessionRequest = {
@@ -952,7 +951,7 @@ Original error: ${originalMessage}`);
    */
   private async createSessionWithAuth(): Promise<void> {
     // Step 1: Authenticate and create client session
-    const authUrl = `${this.baseUrl}/api/1.0/auth`;
+    const authUrl = `${this.baseUrl}/auth`;
     
     console.log(`mapp Connect authentication: ${authUrl}`);
     
@@ -997,9 +996,8 @@ Original error: ${originalMessage}`);
       } else {
         console.log('No specific roles returned (may be anonymous or default access)');
       }
-
       // Step 2: Create OPC UA session
-      const sessionUrl = `${this.baseUrl}/api/1.0/opcua/sessions`;
+      const sessionUrl = `${this.baseUrl}/opcua/sessions`;
       console.log(`Creating OPC UA session: ${sessionUrl}`);
 
       const sessionRequest: SessionRequest = {
@@ -1129,7 +1127,7 @@ Auth data: ${JSON.stringify(authData)}`);
    */
   private async deleteSession(): Promise<void> {
     // Use the proper OPC UA session endpoint for deletion
-    const url = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo!.sessionId}`;
+    const url = `${this.baseUrl}/opcua/sessions/${this.sessionInfo!.sessionId}`;
     console.log(`Deleting mapp Connect session at: ${url}`);
     
     // TODO: Add timeout for delete request to prevent hanging
@@ -1153,7 +1151,7 @@ Auth data: ${JSON.stringify(authData)}`);
     this.sessionTimer = setInterval(async () => {
       try {
         // Use the proper session endpoint for timeout reset
-        const url = `${this.baseUrl}/api/1.0/opcua/sessions/${this.sessionInfo!.sessionId}`;
+        const url = `${this.baseUrl}/opcua/sessions/${this.sessionInfo!.sessionId}`;
         await fetch(url, {
           method: 'HEAD',
           headers: {
@@ -1365,7 +1363,7 @@ Auth data: ${JSON.stringify(authData)}`);
       // Attempt to delete the old session (best effort, may fail if server is down)
       if (oldSessionId) {
         try {
-          const deleteUrl = `${this.baseUrl}/api/1.0/opcua/sessions/${oldSessionId}`;
+          const deleteUrl = `${this.baseUrl}/opcua/sessions/${oldSessionId}`;
           await fetch(deleteUrl, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${oldSessionId}` }

@@ -27,14 +27,16 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { OpcuaMachine } from '../../dist/index.js';
 import { ConnectionState } from '../../dist/types.js';
 
-// Test configuration - matches test server
+// Test configuration - can be overridden via environment variables
+// Examples:
+//   TEST_SERVER=opcuaproxy npm run test:integration
+//   TEST_HOST=10.0.0.1 TEST_PORT=9000 npm run test:integration
 const TEST_CONFIG = {
-  host: 'localhost',
-  port: 8443,
-  protocol: 'https' as const,
-  username: 'dev',
-  password: 'dev',
-  apiBasePath: '/api/1.0'
+  host: process.env.TEST_HOST || 'localhost',
+  port: parseInt(process.env.TEST_PORT || '8443'),
+  protocol: (process.env.TEST_PROTOCOL || 'https') as 'http' | 'https',
+  username: process.env.TEST_USERNAME || 'dev',
+  password: process.env.TEST_PASSWORD || 'dev'
 };
 
 // Test variables available on the test server
@@ -101,8 +103,8 @@ const BASELINE_VALUES = {
   globalFloat: 0.0,
   globalSimple: 0.0,
   struct1Member1: 0,
-  struct1Member2: '',
-  nestedStruct: '',
+  struct1Member2: 0,
+  nestedStruct: 10,
   intArrayElement0: 0,
   arrayElement0Member1: 0,
   arrayElement1Member2: 0,
@@ -178,7 +180,7 @@ describe('Integration Tests - Real Server Communication', () => {
   beforeAll(async () => {
     console.log('🧪 Starting Integration Tests');
     console.log('============================');
-    console.log(`📡 Target Server: ${TEST_CONFIG.protocol}://${TEST_CONFIG.host}:${TEST_CONFIG.port}${TEST_CONFIG.apiBasePath}`);
+    console.log(`📡 Target Server: ${TEST_CONFIG.protocol}://${TEST_CONFIG.host}:${TEST_CONFIG.port}`);
     console.log(`🔑 Credentials: ${TEST_CONFIG.username}/${TEST_CONFIG.password}`);
     
     machine = new OpcuaMachine(TEST_CONFIG);
@@ -999,12 +1001,12 @@ describe('Integration Tests - Real Server Communication', () => {
       }
       
       try {
-        // Test string member
-        const testStr = TEST_VALUES.strings[0];
-        await machine.writeVariable(strVar, testStr);
-        const readStr = await machine.readVariable(strVar);
-        expect(readStr).toBe(testStr);
-        console.log(`✅ Struct member2: ${strVar} = "${testStr}" ✓`);
+        // Test integer member (member2 is also an integer, not a string)
+        const testInt2 = TEST_VALUES.integers[1];
+        await machine.writeVariable(strVar, testInt2);
+        const readInt2 = await machine.readVariable(strVar);
+        expect(readInt2).toBe(testInt2);
+        console.log(`✅ Struct member2: ${strVar} = ${testInt2} ✓`);
       } catch (error) {
         console.log(`⚠️ Struct member2 test skipped: ${strVar} (${error})`);
       }
