@@ -11,5 +11,7 @@
     <Object Type="Program" Language="IEC">demoGlobal</Object>
     <Object Type="Program" Language="IEC">Page</Object>
     <Object Type="Package">mappConnect</Object>
+    <Object Type="File">TestTypes.typ</Object>
+    <Object Type="Program" Language="IEC">TestTypes</Object>
   </Objects>
 </Package>

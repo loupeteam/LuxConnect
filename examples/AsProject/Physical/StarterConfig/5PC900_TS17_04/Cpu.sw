@@ -3,6 +3,7 @@
 <SwConfiguration CpuAddress="SL1" xmlns="http://br-automation.co.at/AS/SwConfiguration">
   <TaskClass Name="Cyclic#1">
     <Task Name="test" Source="test.prg" Memory="UserROM" Language="IEC" Debugging="true" />
+    <Task Name="TestTypes" Source="TestTypes.prg" Memory="UserROM" Language="IEC" Debugging="true" />
     <Task Name="demo" Source="demo.prg" Memory="UserROM" Language="IEC" Debugging="true" />
     <Task Name="demoGlobal" Source="demoGlobal.prg" Memory="UserROM" Language="IEC" Debugging="true" />
     <Task Name="Page" Source="Page.prg" Memory="UserROM" Language="IEC" Debugging="true" />

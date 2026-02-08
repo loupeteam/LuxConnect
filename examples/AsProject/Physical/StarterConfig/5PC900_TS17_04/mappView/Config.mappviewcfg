@@ -6,7 +6,7 @@
       <Selector ID="WebServerProtocol" Value="1">
         <Property ID="WebServerPort" Value="81" />
       </Selector>
-      <Property ID="MaxClientConnections" Value="10" />
+      <Property ID="MaxClientConnections" Value="2" />
       <Property ID="MpUserXUserPreferences" Value="TRUE" />
       <Selector ID="StartupUser" Value="StartupUserAnonymousToken" />
       <Group ID="TcpProxyConf">

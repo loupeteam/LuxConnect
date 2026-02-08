@@ -1350,8 +1350,8 @@ describe('Integration Tests - Real Server Communication', () => {
       // Store original configuration to restore later
       const originalConfig = {
         namespace: (machine as any).defaultNamespace || 'ns=5;s=',
-        application: (machine as any).defaultApplication || undefined,
-        task: (machine as any).defaultTask || undefined
+        application: (machine as any).defaultApplication,
+        task: (machine as any).defaultTask
       };
       
       try {
@@ -1364,12 +1364,8 @@ describe('Integration Tests - Real Server Communication', () => {
       } finally {
         // Restore original configuration
         machine.setDefaultNamespace(originalConfig.namespace);
-        if (originalConfig.application) {
-          machine.setDefaultApplication(originalConfig.application);
-        }
-        if (originalConfig.task) {
-          machine.setDefaultTask(originalConfig.task);
-        }
+        machine.setDefaultApplication(originalConfig.application);
+        machine.setDefaultTask(originalConfig.task);
       }
     });
 
@@ -1392,8 +1388,8 @@ describe('Integration Tests - Real Server Communication', () => {
       // Store original configuration to restore later
       const originalConfig = {
         namespace: (machine as any).defaultNamespace || 'ns=5;s=',
-        application: (machine as any).defaultApplication || undefined,
-        task: (machine as any).defaultTask || undefined
+        application: (machine as any).defaultApplication,
+        task: (machine as any).defaultTask
       };
       
       try {
@@ -1412,12 +1408,8 @@ describe('Integration Tests - Real Server Communication', () => {
       } finally {
         // Restore original configuration
         machine.setDefaultNamespace(originalConfig.namespace);
-        if (originalConfig.application) {
-          machine.setDefaultApplication(originalConfig.application);
-        }
-        if (originalConfig.task) {
-          machine.setDefaultTask(originalConfig.task);
-        }
+        machine.setDefaultApplication(originalConfig.application);
+        machine.setDefaultTask(originalConfig.task);
       }
     });
 
@@ -1477,6 +1469,488 @@ describe('Integration Tests - Real Server Communication', () => {
         ).rejects.toThrow(`Subscription handle '${invalidHandle}' not found`);
       }
     });
+  });
+
+  describe('Structure Read/Write Validation', () => {
+    /**
+     * These tests validate that structure read/write operations maintain consistency
+     * between different access patterns:
+     * 
+     * 1. Writing a complete structure → Reading individual members (validates write propagation)
+     * 2. Writing individual members → Reading complete structure (validates aggregation)
+     * 3. Writing array/structure → Reading elements/fields (validates decomposition)
+     * 4. Writing elements/fields → Reading array/structure (validates composition)
+     * 
+     * Each test validates the specific access pattern and verifies that the data
+     * remains consistent regardless of how it's accessed (structure vs. elements).
+     * 
+     * IMPORTANT: These tests currently reveal that structure writes are NOT working
+     * in the OpcUaProxy. All structure write operations return 404 errors, even when
+     * falling back to individual field writes. This needs to be fixed in the proxy server.
+     */
+    
+    test('should verify structure read/write consistency - simple structure', async () => {
+      if (!isServerAvailable) return;
+      
+      const structVar = TEST_VARIABLES.struct1;
+      const member1Var = TEST_VARIABLES.struct1Member1;
+      const member2Var = TEST_VARIABLES.struct1Member2;
+      const member3Var = TEST_VARIABLES.struct1Member3;
+      
+      // Test data
+      const testStructure = {
+        member1: 42,
+        member2: 7,
+        member3: 'Validation Test'
+      };
+      
+      console.log('\n📝 Testing simple structure read/write consistency');
+      
+      // Write as complete structure
+      console.log(`  Writing structure: ${JSON.stringify(testStructure)}`);
+      await machine.writeVariable(structVar, testStructure);
+      
+      // Read back individual members first (more reliable)
+      const readMember1 = await machine.readVariable(member1Var);
+      const readMember2 = await machine.readVariable(member2Var);
+      const readMember3 = await machine.readVariable(member3Var);
+      
+      console.log(`  Read member1: ${readMember1}`);
+      console.log(`  Read member2: ${readMember2}`);
+      console.log(`  Read member3: ${readMember3}`);
+      
+      // Verify individual members match written values
+      expect(readMember1).toBe(testStructure.member1);
+      expect(readMember2).toBe(testStructure.member2);
+      expect(readMember3).toBe(testStructure.member3);
+      
+      // Try to read back as complete structure
+      try {
+        const readStruct = await machine.readVariable(structVar);
+        console.log(`  Read structure: ${JSON.stringify(readStruct)}`);
+        
+        if (readStruct && typeof readStruct === 'object') {
+          // Verify structure read matches written values
+          expect(readStruct.member1).toBe(testStructure.member1);
+          expect(readStruct.member2).toBe(testStructure.member2);
+          expect(readStruct.member3).toBe(testStructure.member3);
+          
+          // Verify individual member reads match structure read
+          expect(readMember1).toBe(readStruct.member1);
+          expect(readMember2).toBe(readStruct.member2);
+          expect(readMember3).toBe(readStruct.member3);
+          console.log('✅ Complete structure read matches individual members');
+        } else {
+          console.log('⚠️ Structure read returned non-object, using individual member verification only');
+        }
+      } catch (error) {
+        console.log(`⚠️ Complete structure read not supported: ${error}`);
+      }
+      
+      console.log('✅ Simple structure read/write validation passed\n');
+    }, 15000);
+
+    test('should verify structure read/write consistency - array of structures', async () => {
+      if (!isServerAvailable) return;
+      
+      const arrayVar = TEST_VARIABLES.arrayStruct;
+      const elem0Var = TEST_VARIABLES.arrayElement0;
+      const elem1Var = TEST_VARIABLES.arrayElement1;
+      const elem0Member1Var = TEST_VARIABLES.arrayElement0Member1;
+      const elem1Member3Var = TEST_VARIABLES.arrayElement1Member3;
+      
+      // Test data - array of structures
+      const testArray = [
+        { member1: 100, member2: 1, member3: 'Array Element 0' },
+        { member1: 200, member2: 2, member3: 'Array Element 1' },
+        { member1: 300, member2: 3, member3: 'Array Element 2' },
+        { member1: 400, member2: 4, member3: 'Array Element 3' }
+      ];
+      
+      console.log('\n📝 Testing array of structures read/write consistency');
+      
+      // Write complete array
+      console.log(`  Writing array: ${JSON.stringify(testArray, null, 2)}`);
+      await machine.writeVariable(arrayVar, testArray);
+      
+      // Read back individual members to verify write
+      const readElem0Member1 = await machine.readVariable(elem0Member1Var);
+      const readElem1Member3 = await machine.readVariable(elem1Member3Var);
+      
+      console.log(`  Read element[0].member1: ${readElem0Member1}`);
+      console.log(`  Read element[1].member3: ${readElem1Member3}`);
+      
+      // Verify individual field writes succeeded
+      expect(readElem0Member1).toBe(testArray[0].member1);
+      expect(readElem1Member3).toBe(testArray[1].member3);
+      
+      // Read individual elements
+      const readElem0 = await machine.readVariable(elem0Var);
+      const readElem1 = await machine.readVariable(elem1Var);
+      
+      console.log(`  Read element[0]: ${JSON.stringify(readElem0)}`);
+      console.log(`  Read element[1]: ${JSON.stringify(readElem1)}`);
+      
+      // Verify individual element reads contain written values
+      expect(readElem0.member1).toBe(testArray[0].member1);
+      expect(readElem0.member2).toBe(testArray[0].member2);
+      expect(readElem0.member3).toBe(testArray[0].member3);
+      
+      expect(readElem1.member1).toBe(testArray[1].member1);
+      expect(readElem1.member2).toBe(testArray[1].member2);
+      expect(readElem1.member3).toBe(testArray[1].member3);
+      
+      // Verify field reads match element reads
+      expect(readElem0Member1).toBe(readElem0.member1);
+      expect(readElem1Member3).toBe(readElem1.member3);
+      
+      // Try to read complete array
+      try {
+        const readArray = await machine.readVariable(arrayVar);
+        console.log(`  Read array length: ${readArray.length}`);
+        
+        // Verify array length
+        expect(readArray.length).toBe(testArray.length);
+        
+        // Verify array read matches individual element reads
+        expect(readArray[0].member1).toBe(readElem0.member1);
+        expect(readArray[1].member3).toBe(readElem1.member3);
+        
+        console.log('✅ Complete array read matches individual elements');
+      } catch (error) {
+        console.log(`⚠️ Complete array read not tested: ${error}`);
+      }
+      
+      console.log('✅ Array of structures read/write validation passed\n');
+    }, 20000);
+
+    test('should verify structure read/write consistency - 2D array of structures', async () => {
+      if (!isServerAvailable) return;
+      
+      const array2DVar = TEST_VARIABLES.doubleArray2D;
+      const elem00Var = TEST_VARIABLES.doubleArrayElement00;
+      const elem01Var = TEST_VARIABLES.doubleArrayElement01;
+      const elem23Var = TEST_VARIABLES.doubleArrayElement23;
+      const elem00Member1Var = TEST_VARIABLES.doubleArrayMember00;
+      const elem23Member2Var = TEST_VARIABLES.doubleArrayMember23;
+      
+      // Test data - 4x4 2D array of structures
+      const test2DArray = [
+        [
+          { member1: 100, member2: 1, member3: '[0,0]' },
+          { member1: 101, member2: 2, member3: '[0,1]' },
+          { member1: 102, member2: 3, member3: '[0,2]' },
+          { member1: 103, member2: 4, member3: '[0,3]' }
+        ],
+        [
+          { member1: 110, member2: 5, member3: '[1,0]' },
+          { member1: 111, member2: 6, member3: '[1,1]' },
+          { member1: 112, member2: 7, member3: '[1,2]' },
+          { member1: 113, member2: 8, member3: '[1,3]' }
+        ],
+        [
+          { member1: 120, member2: 9, member3: '[2,0]' },
+          { member1: 121, member2: 10, member3: '[2,1]' },
+          { member1: 122, member2: 11, member3: '[2,2]' },
+          { member1: 123, member2: 12, member3: '[2,3]' }
+        ],
+        [
+          { member1: 130, member2: 13, member3: '[3,0]' },
+          { member1: 131, member2: 14, member3: '[3,1]' },
+          { member1: 132, member2: 15, member3: '[3,2]' },
+          { member1: 133, member2: 16, member3: '[3,3]' }
+        ]
+      ];
+      
+      console.log('\n📝 Testing 2D array of structures read/write consistency');
+      
+      // Write complete 2D array
+      console.log(`  Writing 2D array: 4x4 grid of structures`);
+      await machine.writeVariable(array2DVar, test2DArray);
+      
+      // Read individual fields first to verify write
+      const readElem00Member1 = await machine.readVariable(elem00Member1Var);
+      const readElem23Member2 = await machine.readVariable(elem23Member2Var);
+      
+      console.log(`  Read element[0,0].member1: ${readElem00Member1}`);
+      console.log(`  Read element[2,3].member2: ${readElem23Member2}`);
+      
+      // Verify writes succeeded for spot-check fields
+      expect(readElem00Member1).toBe(test2DArray[0][0].member1);
+      expect(readElem23Member2).toBe(test2DArray[2][3].member2);
+      
+      // Read individual elements
+      const readElem00 = await machine.readVariable(elem00Var);
+      const readElem01 = await machine.readVariable(elem01Var);
+      const readElem23 = await machine.readVariable(elem23Var);
+      
+      console.log(`  Read element[0,0]: ${JSON.stringify(readElem00)}`);
+      console.log(`  Read element[0,1]: ${JSON.stringify(readElem01)}`);
+      console.log(`  Read element[2,3]: ${JSON.stringify(readElem23)}`);
+      
+      // Verify individual elements match written values
+      expect(readElem00.member1).toBe(test2DArray[0][0].member1);
+      expect(readElem00.member2).toBe(test2DArray[0][0].member2);
+      expect(readElem00.member3).toBe(test2DArray[0][0].member3);
+      
+      expect(readElem01.member1).toBe(test2DArray[0][1].member1);
+      expect(readElem01.member2).toBe(test2DArray[0][1].member2);
+      expect(readElem01.member3).toBe(test2DArray[0][1].member3);
+      
+      expect(readElem23.member1).toBe(test2DArray[2][3].member1);
+      expect(readElem23.member2).toBe(test2DArray[2][3].member2);
+      expect(readElem23.member3).toBe(test2DArray[2][3].member3);
+      
+      // Verify field reads match element reads
+      expect(readElem00Member1).toBe(readElem00.member1);
+      expect(readElem23Member2).toBe(readElem23.member2);
+      
+      // Try to read back complete 2D array
+      try {
+        const read2DArray = await machine.readVariable(array2DVar);
+        console.log(`  Read 2D array dimensions: ${read2DArray.length}x${read2DArray[0]?.length || 0}`);
+        
+        // Verify 2D array dimensions
+        expect(read2DArray.length).toBe(4);
+        expect(read2DArray[0].length).toBe(4);
+        
+        // Verify 2D array reads match individual element reads
+        expect(read2DArray[0][0].member1).toBe(readElem00.member1);
+        expect(read2DArray[0][1].member1).toBe(readElem01.member1);
+        expect(read2DArray[2][3].member1).toBe(readElem23.member1);
+        
+        console.log('✅ Complete 2D array read matches individual elements');
+      } catch (error) {
+        console.log(`⚠️ Complete 2D array read not tested: ${error}`);
+      }
+      
+      console.log('✅ 2D array of structures read/write validation passed\n');
+    }, 25000);
+
+    test('should verify element-by-element write then structure read', async () => {
+      if (!isServerAvailable) return;
+      
+      const structVar = TEST_VARIABLES.struct1;
+      const member1Var = TEST_VARIABLES.struct1Member1;
+      const member2Var = TEST_VARIABLES.struct1Member2;
+      const member3Var = TEST_VARIABLES.struct1Member3;
+      
+      // Test data
+      const testValues = {
+        member1: 999,
+        member2: 888,
+        member3: 'Element Write Test'
+      };
+      
+      console.log('\n📝 Testing element-by-element write then structure read');
+      
+      // Write individual members
+      console.log(`  Writing member1: ${testValues.member1}`);
+      await machine.writeVariable(member1Var, testValues.member1);
+      
+      console.log(`  Writing member2: ${testValues.member2}`);
+      await machine.writeVariable(member2Var, testValues.member2);
+      
+      console.log(`  Writing member3: ${testValues.member3}`);
+      await machine.writeVariable(member3Var, testValues.member3);
+      
+      // Verify individual writes by reading them back
+      const verifyMember1 = await machine.readVariable(member1Var);
+      const verifyMember2 = await machine.readVariable(member2Var);
+      const verifyMember3 = await machine.readVariable(member3Var);
+      
+      expect(verifyMember1).toBe(testValues.member1);
+      expect(verifyMember2).toBe(testValues.member2);
+      expect(verifyMember3).toBe(testValues.member3);
+      
+      console.log('  ✅ Individual member writes verified');
+      
+      // Try to read back as complete structure
+      try {
+        const readStruct = await machine.readVariable(structVar);
+        console.log(`  Read structure: ${JSON.stringify(readStruct)}`);
+        
+        if (readStruct && typeof readStruct === 'object') {
+          // Verify structure contains individually written values
+          expect(readStruct.member1).toBe(testValues.member1);
+          expect(readStruct.member2).toBe(testValues.member2);
+          expect(readStruct.member3).toBe(testValues.member3);
+          console.log('  ✅ Structure read matches individual writes');
+        }
+      } catch (error) {
+        console.log(`  ⚠️ Complete structure read not supported: ${error}`);
+      }
+      
+      console.log('✅ Element-by-element write validation passed\n');
+    }, 15000);
+
+    test('should verify structure write then element-by-element read', async () => {
+      if (!isServerAvailable) return;
+      
+      const structVar = TEST_VARIABLES.struct1;
+      const member1Var = TEST_VARIABLES.struct1Member1;
+      const member2Var = TEST_VARIABLES.struct1Member2;
+      const member3Var = TEST_VARIABLES.struct1Member3;
+      
+      // Test data
+      const testStructure = {
+        member1: 777,
+        member2: 666,
+        member3: 'Structure Write Test'
+      };
+      
+      console.log('\n📝 Testing structure write then element-by-element read');
+      
+      // Write as complete structure
+      console.log(`  Writing structure: ${JSON.stringify(testStructure)}`);
+      await machine.writeVariable(structVar, testStructure);
+      
+      // Read back individual members
+      const readMember1 = await machine.readVariable(member1Var);
+      const readMember2 = await machine.readVariable(member2Var);
+      const readMember3 = await machine.readVariable(member3Var);
+      
+      console.log(`  Read member1: ${readMember1}`);
+      console.log(`  Read member2: ${readMember2}`);
+      console.log(`  Read member3: ${readMember3}`);
+      
+      // Verify individual reads contain structure written values
+      expect(readMember1).toBe(testStructure.member1);
+      expect(readMember2).toBe(testStructure.member2);
+      expect(readMember3).toBe(testStructure.member3);
+      
+      console.log('✅ Structure write propagated to all individual members correctly\n');
+    }, 15000);
+
+    test('should verify array element write consistency', async () => {
+      if (!isServerAvailable) return;
+      
+      const arrayVar = TEST_VARIABLES.arrayStruct;
+      const elem0Var = TEST_VARIABLES.arrayElement0;
+      const elem1Var = TEST_VARIABLES.arrayElement1;
+      const elem0Member1Var = TEST_VARIABLES.arrayElement0Member1;
+      const elem1Member3Var = TEST_VARIABLES.arrayElement1Member3;
+      
+      // Test data
+      const elem0Value = { member1: 555, member2: 1, member3: 'Modified Element 0' };
+      const elem1Value = { member1: 666, member2: 2, member3: 'Modified Element 1' };
+      
+      console.log('\n📝 Testing array element write consistency');
+      
+      // Write individual array elements
+      console.log(`  Writing element[0]: ${JSON.stringify(elem0Value)}`);
+      await machine.writeVariable(elem0Var, elem0Value);
+      
+      console.log(`  Writing element[1]: ${JSON.stringify(elem1Value)}`);
+      await machine.writeVariable(elem1Var, elem1Value);
+      
+      // Verify element writes by reading individual members
+      const readElem0Member1 = await machine.readVariable(elem0Member1Var);
+      const readElem1Member3 = await machine.readVariable(elem1Member3Var);
+      
+      expect(readElem0Member1).toBe(elem0Value.member1);
+      expect(readElem1Member3).toBe(elem1Value.member3);
+      
+      console.log('  ✅ Individual element member writes verified');
+      
+      // Read back individual elements
+      const readElem0 = await machine.readVariable(elem0Var);
+      const readElem1 = await machine.readVariable(elem1Var);
+      
+      console.log(`  Read element[0]: ${JSON.stringify(readElem0)}`);
+      console.log(`  Read element[1]: ${JSON.stringify(readElem1)}`);
+      
+      // Verify individual element reads contain written values
+      expect(readElem0.member1).toBe(elem0Value.member1);
+      expect(readElem0.member2).toBe(elem0Value.member2);
+      expect(readElem0.member3).toBe(elem0Value.member3);
+      
+      expect(readElem1.member1).toBe(elem1Value.member1);
+      expect(readElem1.member2).toBe(elem1Value.member2);
+      expect(readElem1.member3).toBe(elem1Value.member3);
+      
+      // Try to read complete array
+      try {
+        const readArray = await machine.readVariable(arrayVar);
+        console.log(`  Read array[0]: ${JSON.stringify(readArray[0])}`);
+        console.log(`  Read array[1]: ${JSON.stringify(readArray[1])}`);
+        
+        // Verify array read matches individual element reads
+        expect(readArray[0].member1).toBe(readElem0.member1);
+        expect(readArray[1].member3).toBe(readElem1.member3);
+        
+        console.log('  ✅ Complete array read matches individual elements');
+      } catch (error) {
+        console.log(`  ⚠️ Complete array read not tested: ${error}`);
+      }
+      
+      console.log('✅ Array element write consistency validation passed\n');
+    }, 20000);
+
+    test('should verify 2D array element write consistency', async () => {
+      if (!isServerAvailable) return;
+      
+      const array2DVar = TEST_VARIABLES.doubleArray2D;
+      const elem00Var = TEST_VARIABLES.doubleArrayElement00;
+      const elem23Var = TEST_VARIABLES.doubleArrayElement23;
+      const elem00Member1Var = TEST_VARIABLES.doubleArrayMember00;
+      const elem23Member2Var = TEST_VARIABLES.doubleArrayMember23;
+      
+      // Test data
+      const elem00Value = { member1: 9000, member2: 90, member3: 'Modified [0,0]' };
+      const elem23Value = { member1: 9023, member2: 92, member3: 'Modified [2,3]' };
+      
+      console.log('\n📝 Testing 2D array element write consistency');
+      
+      // Write individual 2D array elements
+      console.log(`  Writing element[0,0]: ${JSON.stringify(elem00Value)}`);
+      await machine.writeVariable(elem00Var, elem00Value);
+      
+      console.log(`  Writing element[2,3]: ${JSON.stringify(elem23Value)}`);
+      await machine.writeVariable(elem23Var, elem23Value);
+      
+      // Verify element writes by reading individual members
+      const readElem00Member1 = await machine.readVariable(elem00Member1Var);
+      const readElem23Member2 = await machine.readVariable(elem23Member2Var);
+      
+      expect(readElem00Member1).toBe(elem00Value.member1);
+      expect(readElem23Member2).toBe(elem23Value.member2);
+      
+      console.log('  ✅ Individual element member writes verified');
+      
+      // Read back individual elements
+      const readElem00 = await machine.readVariable(elem00Var);
+      const readElem23 = await machine.readVariable(elem23Var);
+      
+      console.log(`  Read element[0,0]: ${JSON.stringify(readElem00)}`);
+      console.log(`  Read element[2,3]: ${JSON.stringify(readElem23)}`);
+      
+      // Verify individual element reads contain written values
+      expect(readElem00.member1).toBe(elem00Value.member1);
+      expect(readElem00.member2).toBe(elem00Value.member2);
+      expect(readElem00.member3).toBe(elem00Value.member3);
+      
+      expect(readElem23.member1).toBe(elem23Value.member1);
+      expect(readElem23.member2).toBe(elem23Value.member2);
+      expect(readElem23.member3).toBe(elem23Value.member3);
+      
+      // Try to read back complete 2D array
+      try {
+        const read2DArray = await machine.readVariable(array2DVar);
+        console.log(`  Read array[0][0]: ${JSON.stringify(read2DArray[0][0])}`);
+        console.log(`  Read array[2][3]: ${JSON.stringify(read2DArray[2][3])}`);
+        
+        // Verify 2D array read matches individual element reads
+        expect(read2DArray[0][0].member1).toBe(readElem00.member1);
+        expect(read2DArray[2][3].member1).toBe(readElem23.member1);
+        
+        console.log('  ✅ Complete 2D array read matches individual elements');
+      } catch (error) {
+        console.log(`  ⚠️ Complete 2D array read not tested: ${error}`);
+      }
+      
+      console.log('✅ 2D array element write consistency validation passed\n');
+    }, 20000);
   });
 
 

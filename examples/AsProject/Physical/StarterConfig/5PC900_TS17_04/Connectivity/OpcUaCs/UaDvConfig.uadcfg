@@ -3,7 +3,7 @@
 <Configuration>
   <Element ID="DefaultViewConfiguration" Type="uadcfg">
     <Group ID="InformationModels">
-      <Property ID="ComplexTypeFacet" Value="0" />
+      <Property ID="ComplexTypeFacet" Value="2" />
       <Property ID="ExportTypeInformation" Value="1" />
       <Property ID="DedicatedTypeDefinitionsForStructures" Value="1" />
     </Group>

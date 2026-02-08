@@ -59,5 +59,28 @@
         </Variable>
       </Variable>
     </Task>
+    <Task Name="TestTypes">
+      <Variable Name="allTypesStruct" RecursiveEnable="2" />
+      <Variable Name="bool" />
+      <Variable Name="boolArr" RecursiveEnable="2" />
+      <Variable Name="dateonly" />
+      <Variable Name="dt" />
+      <Variable Name="float32" />
+      <Variable Name="float64" />
+      <Variable Name="int16" />
+      <Variable Name="int32" />
+      <Variable Name="int8" />
+      <Variable Name="intArr" RecursiveEnable="2" />
+      <Variable Name="nestedStruct" RecursiveEnable="2" />
+      <Variable Name="realArr" RecursiveEnable="2" />
+      <Variable Name="str" />
+      <Variable Name="strArr" RecursiveEnable="2" />
+      <Variable Name="structArr" RecursiveEnable="2" />
+      <Variable Name="tod" />
+      <Variable Name="uint16" />
+      <Variable Name="uint32" />
+      <Variable Name="uint8" />
+      <Variable Name="wstr" />
+    </Task>
   </Module>
 </OpcUaSource>

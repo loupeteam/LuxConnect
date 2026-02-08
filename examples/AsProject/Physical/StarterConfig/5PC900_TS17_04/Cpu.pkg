@@ -19,10 +19,9 @@
     <Object Type="Package">mappConnect</Object>
   </Objects>
   <Configuration ModuleId="5PC900.TS17-04">
-    <AutomationRuntime Version="6.4.2" />
-    <Build GccVersion="11.3.0" PreBuildStep="" />
+    <AutomationRuntime Version="6.5.1" />
+    <Build GccVersion="11.3.0" />
     <DefaultTargetMemory Tasks="UserROM" />
-    <Transfer SavedOfflineInstallationFolder="" SavedPipDestinationFolder="" SavedRuntimeUtilityCenterPackagePath="" />
-    <Vc FirmwareVersion="" />
+    <Transfer WaitForReconnectAfterReboot="True" />
   </Configuration>
 </Cpu>
