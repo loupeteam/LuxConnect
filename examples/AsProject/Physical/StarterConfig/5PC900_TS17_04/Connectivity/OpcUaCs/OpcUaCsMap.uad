@@ -58,6 +58,7 @@
           <Variable Name="ints" RecursiveEnable="2" />
         </Variable>
       </Variable>
+      <Variable Name="updating" />
     </Task>
     <Task Name="TestTypes">
       <Variable Name="allTypesStruct" RecursiveEnable="2" />

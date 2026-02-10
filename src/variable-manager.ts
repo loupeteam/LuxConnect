@@ -569,6 +569,10 @@ export class VariableManager {
    * Write a complex value by decomposing it into individual simple values
    * Uses Microsoft Graph JSON batching for efficient multi-variable writes
    * No registration required - builds NodeIds dynamically
+   * 
+   * Always uses JavaScript bracket notation [0][0] for nested arrays.
+   * The OpcUaProxy server handles conversion to OPC UA comma notation [0,0]
+   * when the underlying PLC variable requires it.
    */
   private async writeComplexValue(value: OpcuaValue, originalName: string): Promise<void> {
     const flattenedValues = this.flattenValue('', value);
@@ -588,7 +592,6 @@ export class VariableManager {
       const fullVariableName = originalName + path;
       
       try {
-        // Build nodeId dynamically for the sub-variable - no registration required
         const subNodeId = this.buildNodeId(fullVariableName);
         
         batchWrites.push({
@@ -607,7 +610,8 @@ export class VariableManager {
   }
 
   /**
-   * Flatten a complex value into simple path-value pairs
+   * Flatten a complex value into simple path-value pairs.
+   * Uses JavaScript bracket notation [0][1] for nested arrays.
    */
   private flattenValue(basePath: string, value: OpcuaValue): Array<{ path: string; value: OpcuaValue }> {
     const result: Array<{ path: string; value: OpcuaValue }> = [];

@@ -23,7 +23,8 @@ describe('WebSocket (Node.js)', () => {
   it('should not have browser globals', () => {
     expect(typeof window).toBe('undefined')
     expect(typeof document).toBe('undefined')
-    expect(typeof navigator).toBe('undefined')
+    // Note: navigator is available as a global in Node.js 21+
+    // so we only check window and document
   })
 })
 

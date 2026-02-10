@@ -3,11 +3,12 @@ PROGRAM _INIT
 
 	test;
 	test_arrays;
-	
 
 END_PROGRAM
 
 PROGRAM _CYCLIC
+
+	updating := updating + 2;
 
 	
 END_PROGRAM

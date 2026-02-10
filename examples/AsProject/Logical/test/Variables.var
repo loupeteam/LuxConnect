@@ -1,4 +1,5 @@
 VAR
+	updating : UDINT;
 	test_arrays : TestArrays;
 	test : TestStruct;
 END_VAR
