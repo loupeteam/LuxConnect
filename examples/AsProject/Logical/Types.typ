@@ -43,4 +43,14 @@ TYPE
 		status : {REDUND_UNREPLICABLE} STRING[80];
 		temperature : {REDUND_UNREPLICABLE} REAL;
 	END_STRUCT;
+	TestEnum : 
+		(
+		Value1,
+		Value2,
+		Value3,
+		Value4,
+		Value5,
+		Value6,
+		Value7
+		);
 END_TYPE

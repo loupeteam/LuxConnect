@@ -1,4 +1,6 @@
 VAR
+	gRequestedMode : TestEnum;
+	gActiveMode : TestEnum;
 	testarray : TestArrays;
 	gSimple : REAL;
 	gtest : TestStruct;

@@ -3,7 +3,8 @@ PROGRAM _INIT
 
 	test;
 	test_arrays;
-
+	gActiveMode;
+	gRequestedMode;
 END_PROGRAM
 
 PROGRAM _CYCLIC
