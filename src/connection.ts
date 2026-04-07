@@ -192,6 +192,10 @@ export class OpcuaConnection {
   // Subscription tracking for orphaned cleanup
   private knownSubscriptionIds = new Set<number>();
 
+  // Tracks an in-progress disconnect so connect() can wait for it to finish
+  // before starting a new session (prevents race in React Strict Mode double-invoke)
+  private _pendingDisconnect: Promise<void> | null = null;
+
   constructor(config: ConnectionConfig) {
     this.config = {
       protocol: 'http',           // Default to HTTP
@@ -412,6 +416,12 @@ export class OpcuaConnection {
    * Connect to the OPC UA server
    */
   public async connect(): Promise<void> {
+    // If a disconnect is still in progress (e.g. React Strict Mode cleanup),
+    // wait for it to finish before creating a new session.
+    if (this._pendingDisconnect) {
+      await this._pendingDisconnect;
+    }
+
     try {
       this.setState(ConnectionState.CONNECTING);
 
@@ -456,6 +466,11 @@ export class OpcuaConnection {
    * Disconnect from the OPC UA server
    */
   public async disconnect(): Promise<void> {
+    this._pendingDisconnect = this._doDisconnect();
+    return this._pendingDisconnect;
+  }
+
+  private async _doDisconnect(): Promise<void> {
     this.setState(ConnectionState.DISCONNECTING);
 
     // Stop timers
@@ -487,6 +502,7 @@ export class OpcuaConnection {
     this.sessionInfo = null;
     this.clearStoredSession(); // Clear localStorage when disconnecting
     this.setState(ConnectionState.DISCONNECTED);
+    this._pendingDisconnect = null;
   }
 
   /**
@@ -653,10 +669,25 @@ export class OpcuaConnection {
       });
 
       if (!response.ok) {
+        // Read response body for richer diagnostics (best-effort)
+        let bodyText = '';
+        try {
+          bodyText = await response.text();
+        } catch (readErr) {
+          bodyText = `<failed to read body: ${String(readErr)}>`;
+        }
+
+        // Log for developer debugging
+        try {
+          console.error(`API request failed: ${response.status} ${response.statusText} - ${bodyText}`, { url, endpoint, options });
+        } catch (logErr) {
+          // ignore logging failures
+        }
+
         return rejectWithError(
           LuxConnectErrorCode.SERVER_ERROR,
-          `API request failed: ${response.status} ${response.statusText}`,
-          { status: response.status, statusText: response.statusText, endpoint }
+          `API request failed: ${response.status} ${response.statusText} - ${bodyText}`,
+          { status: response.status, statusText: response.statusText, endpoint, body: bodyText }
         );
       }
 
