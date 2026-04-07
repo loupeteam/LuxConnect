@@ -7,5 +7,20 @@
       <Property ID="ExportTypeInformation" Value="1" />
       <Property ID="DedicatedTypeDefinitionsForStructures" Value="1" />
     </Group>
+    <Group ID="DefaultRolePermissions">
+      <Group ID="Role [1]">
+        <Property ID="Name" />
+        <Group ID="RolePermissions">
+          <Property ID="PermissionBrowse" Value="1" />
+          <Property ID="PermissionRead" Value="1" />
+          <Property ID="PermissionWrite" Value="1" />
+          <Property ID="PermissionCall" Value="0" />
+          <Property ID="PermissionReadRolePermissions" Value="0" />
+          <Property ID="PermissionWriteRolePermissions" Value="0" />
+          <Property ID="PermissionWriteAttribute" Value="0" />
+          <Property ID="PermissionReadHistory" Value="0" />
+        </Group>
+      </Group>
+    </Group>
   </Element>
 </Configuration>
