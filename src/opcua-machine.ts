@@ -758,7 +758,24 @@ export class OpcuaMachine {
         console.log(`✅ Subscription '${readGroupName}' created with ${variablesToAdd.length} variables`);
       }
     } catch (error) {
-      console.error(`Failed to create/update subscription '${readGroupName}':`, error);
+      // If the subscription was stale on the server (e.g. from a previous session that
+      // disconnected mid-flight), delete it locally and retry once from scratch.
+      const msg = (error as Error).message ?? '';
+      if (msg.includes('not found on server')) {
+        console.warn(`Subscription '${readGroupName}' was stale — deleting and retrying...`);
+        try {
+          await this.subscriptionManager.deleteSubscription(readGroupName);
+        } catch {
+          // Ignore — the subscription may already be gone server-side
+        }
+        try {
+          await this.doCreateOrUpdateSubscription(readGroupName);
+        } catch (retryError) {
+          console.error(`Retry also failed for subscription '${readGroupName}':`, retryError);
+        }
+      } else {
+        console.error(`Failed to create/update subscription '${readGroupName}':`, error);
+      }
     }
   }
 

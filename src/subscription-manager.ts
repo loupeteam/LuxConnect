@@ -681,9 +681,16 @@ export class SubscriptionManager {
             this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
           } else {
             console.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
+            // If the server says the subscription no longer exists, throw so the caller
+            // can delete and re-create it rather than silently losing the variable.
+            const msg: string = response?.body?.message ?? '';
+            if (response.status === 404 && msg.toLowerCase().includes('subscriptionid')) {
+              throw new Error(`Subscription ${subscription.subscriptionId} not found on server (404). Will retry.`);
+            }
           }
         }
-        console.log(`✅ Batch add completed: ${results.responses.length} items processed`);
+        const successCount = results.responses.filter((r: {body?: {monitoredItemId?: unknown}}) => r.body?.monitoredItemId).length;
+        console.log(`✅ Batch add completed: ${successCount}/${results.responses.length} items registered`);
       }
     } catch (batchError) {
       // Fallback to individual operations if batch is not supported
