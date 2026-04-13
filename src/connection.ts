@@ -487,15 +487,12 @@ export class OpcuaConnection {
     // Close WebSocket
     this.webSocketManager.close();
 
-    // TODO: Add graceful shutdown timeout to prevent hanging
-    // TODO: Clean up any pending API requests
     // Delete session
     if (this.sessionInfo) {
       try {
         await this.deleteSession();
       } catch (error) {
-        // Ignore errors during cleanup
-        // TODO: Log cleanup errors for debugging
+        console.warn('[LuxConnect] Session cleanup error (non-fatal):', error);
       }
     }
 
@@ -869,9 +866,6 @@ Original error: ${message}`);
     const errorMsg = error.message.toLowerCase();
     const originalMessage = error.message;
     
-    // TODO: Add more specific error detection patterns
-    // TODO: Consider adding error codes for programmatic handling
-    // TODO: Add support for different error messages in multiple languages
     if (errorMsg.includes('certificate') || errorMsg.includes('ssl') || errorMsg.includes('tls') || 
         errorMsg.includes('authority') || errorMsg.includes('net::err_cert') || 
         errorMsg.includes('sec_error') || errorMsg.includes('insecure')) {
@@ -1161,14 +1155,21 @@ Auth data: ${JSON.stringify(authData)}`);
     const url = `${this.baseUrl}/opcua/sessions/${this.sessionInfo!.sessionId}`;
     console.log(`Deleting mapp Connect session at: ${url}`);
     
-    // TODO: Add timeout for delete request to prevent hanging
-    // TODO: Handle specific HTTP error codes (404 if already deleted, etc.)
-    await fetch(url, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${this.sessionInfo!.sessionId}`
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${this.sessionInfo!.sessionId}` },
+        signal: controller.signal,
+      });
+      // 404 means the session was already cleaned up server-side — not an error.
+      if (!response.ok && response.status !== 404) {
+        console.warn(`[LuxConnect] deleteSession returned ${response.status}`);
       }
-    });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /**

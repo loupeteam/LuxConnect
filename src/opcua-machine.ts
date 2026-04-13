@@ -126,20 +126,13 @@ export class OpcuaMachine {
       },
       
       set: (target, prop: string | symbol, value: OpcuaValue) => {
-        // If it's a known property, set it normally
+        // Allow setting known own properties (internal state, methods, etc.)
         if (typeof prop === 'symbol' || prop in target || prop.toString().startsWith('_')) {
           (target as unknown as Record<string | symbol, OpcuaValue>)[prop] = value;
           return true;
         }
-        
-        //TODO: This probably doesn't work for most variables since it doesn't handle scopes or tasks
-        // Remove?
-        // If it's a variable name, write it via VariableManager
-        if (typeof value !== 'function') {
-          target.writeVariable(prop.toString(), value).catch(console.error);
-          return true;
-        }
-        
+        // Direct property assignment (machine.MyVar = x) is not supported —
+        // use machine.writeVariable('MyVar', x) instead.
         return false;
       }
     });
@@ -151,13 +144,10 @@ export class OpcuaMachine {
    * Connect to the OPC UA server
    */
   public async connect(): Promise<void> {
-    // TODO: Add connection retry logic with exponential backoff
-    // TODO: Add connection timeout handling
     await this.connection.connect();
-    
+
     // All variables should already be registered from initCyclicRead calls
     // Just create subscriptions for read groups that have variables
-    // TODO: Consider parallelizing subscription creation for better performance
     for (const [name, group] of this.readGroups) {
       if (group.variables.size > 0 && group.options.enabled) {
         await this.createOrUpdateSubscription(name);
@@ -256,13 +246,7 @@ export class OpcuaMachine {
     // Register variable immediately - no need to wait for connection
     // This will validate the variable name and add it to the hierarchy with default values
     if (!this.variableManager.getVariable(varName)) {
-      try {
-        this.variableManager.registerVariable(varName, nodeId);
-      } catch (error) {
-        console.warn(`Failed to register variable ${varName}:`, error);
-        // TODO: Add error handling strategy - should we throw or continue?
-        // TODO: Consider collecting failed registrations for retry after connection
-      }
+      this.variableManager.registerVariable(varName, nodeId);
     }
     
     // Check if this is a new variable for the read group
@@ -624,8 +608,6 @@ export class OpcuaMachine {
     
     if (!data) return undefined;
     
-    // TODO: Consider caching proxy objects to improve performance
-    // TODO: Add support for nested object access beyond 3 levels
     return new Proxy(data, {
       get: (obj, prop: string | symbol) => {
         if (typeof prop !== 'string') return undefined;

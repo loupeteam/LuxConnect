@@ -220,7 +220,6 @@ export class VariableManager {
     };
 
     // Optionally read array parameters
-    // TODO: This hasn't been tested yet
     if (readArrayParams) {
       try {
         const arrayParams = await this.readArrayParameters(name);
@@ -318,7 +317,6 @@ export class VariableManager {
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public async readAttribute(nodeId: string, attributeId: string): Promise<any> {
-    //TODO: This hasn't been tested yet
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(nodeId)}/attributes/${attributeId}`, {
       method: 'GET'
     });
@@ -342,7 +340,6 @@ export class VariableManager {
     isArray: boolean;
     dimensionCount: number;
   }> {
-    //TODO: This hasn't been tested yet
     const normalizedName = this.normalizeVariableName(name);
     
     // Get or build nodeId

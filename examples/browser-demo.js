@@ -25,12 +25,7 @@ function log(message) {
 
 function updateStatus(state) {
     const statusElement = document.getElementById('status');
-    statusElement        // Summary after a delay to let all operations complete
-    setTimeout(() => {
-        log('');
-        log('📊 Write Demo Summary');
-        log('====================');
-    }, 2000); // Wait 2 seconds for all async operations to completee.charAt(0).toUpperCase() + state.slice(1);
+    statusElement.textContent = state.charAt(0).toUpperCase() + state.slice(1);
     statusElement.className = `status ${state}`;
 }
 

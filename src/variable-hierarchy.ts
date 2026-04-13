@@ -590,10 +590,9 @@ export class VariableHierarchy {
         // Handle array indices - support flat arrays only
         const indices = this.parseArrayIndices(segment);
         
-        // For multi-dimensional access, calculate flat index
+        // For multi-dimensional access, navigate the nested structure.
+        // Note: flat-index calculation (requires OPC UA arrayDimensions) is not yet supported.
         if (indices.length > 1) {
-          // TODO: Look up array dimensions and calculate flat index
-          // For now, navigate nested structure for testing compatibility
           let target = current;
           for (const index of indices) {
             if (target == null || typeof target !== 'object' || target[index] == null) {
@@ -652,10 +651,9 @@ export class VariableHierarchy {
       // Handle array indices - keep arrays flat and simple
       const indices = this.parseArrayIndices(segment);
       
-      // For multi-dimensional access like [1,2,3], calculate flat index
+      // For multi-dimensional access like [1,2,3], navigate nested structure.
+      // Note: flat-index calculation (requires OPC UA arrayDimensions) is not yet supported.
       if (indices.length > 1) {
-        // TODO: Look up array dimensions and calculate flat index
-        // For now, create nested array structure for testing compatibility
         let target = current;
         for (let j = 0; j < indices.length - 1; j++) {
           const index = indices[j];
@@ -886,46 +884,6 @@ export class VariableHierarchy {
     return segment.startsWith('[') && segment.endsWith(']');
   }
 
-  /**
-   * Calculate flat array index from multi-dimensional indices using OPC UA array dimensions
-   * @param indices The multi-dimensional indices (e.g., [3, 1] for Matrix[3,1])
-   * @param arrayDimensions The OPC UA array dimensions (e.g., [[1, 4], [0, 2]])
-   * @returns The flat index to access the value in a 1D array
-   */
-  /* TODO: Implement multi-dimensional array support
-  private calculateFlatIndex(indices: number[], arrayDimensions: Array<[number, number]>): number {
-    if (indices.length !== arrayDimensions.length) {
-      throw new Error(`Index dimensions (${indices.length}) must match array dimensions (${arrayDimensions.length})`);
-    }
-
-    // Validate indices are within bounds and normalize them (subtract start values)
-    const normalizedIndices: number[] = [];
-    const sizes: number[] = [];
-    
-    for (let i = 0; i < indices.length; i++) {
-      const [start, end] = arrayDimensions[i];
-      const index = indices[i];
-      
-      if (index < start || index > end) {
-        throw new Error(`Index ${index} is out of bounds for dimension ${i} [${start}, ${end}]`);
-      }
-      
-      normalizedIndices[i] = index - start; // Normalize to zero-based
-      sizes[i] = end - start + 1; // Calculate size of this dimension
-    }
-
-    // Calculate flat index using row-major order (rightmost dimension varies fastest)
-    let flatIndex = 0;
-    let multiplier = 1;
-    
-    for (let i = normalizedIndices.length - 1; i >= 0; i--) {
-      flatIndex += normalizedIndices[i] * multiplier;
-      multiplier *= sizes[i];
-    }
-
-    return flatIndex;
-  }
-  */
 
   /**
    * Extract the base array name from a variable name
@@ -954,45 +912,6 @@ export class VariableHierarchy {
     return content.split(',').map(s => parseInt(s.trim(), 10));
   }
 
-  /**
-   * Check if an object has array-like string keys (like "[0]", "[1]")
-   */
-  /* TODO: Remove if not needed for backward compatibility
-  private hasArrayLikeKeys(obj: any): boolean {
-    if (!obj || typeof obj !== 'object') return false;
-    const keys = Object.keys(obj);
-    return keys.length > 0 && keys.every(key => /^\[\d+.*\]$/.test(key));
-  }
-  */
-
-  /**
-   * Convert an object with array-like keys to a proper array
-   */
-  /* TODO: Remove if not needed for backward compatibility
-  private convertObjectToArray(obj: OpcuaObject): OpcuaArray {
-    const result: OpcuaArray = [];
-    
-    for (const [key, value] of Object.entries(obj)) {
-      if (this.isArrayIndex(key)) {
-        const indices = this.parseArrayIndices(key);
-        let target = result;
-        
-        // Navigate to the right position in multi-dimensional array
-        for (let i = 0; i < indices.length - 1; i++) {
-          const index = indices[i];
-          if (target[index] == null) {
-            target[index] = [];
-          }
-          target = target[index];
-        }
-        
-        target[indices[indices.length - 1]] = value;
-      }
-    }
-    
-    return result;
-  }
-  */
 
   /**
    * Deep clone a value

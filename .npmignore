@@ -1,0 +1,28 @@
+# Source & config
+src/
+tsconfig.json
+vitest.config.ts
+
+# Tests & coverage
+tests/
+coverage/
+
+# Examples & docs (too large for npm, link to GitHub instead)
+examples/
+docs/
+
+# Scripts & dev tooling
+scripts/
+start-chrome-dev.bat
+config.json
+logs/
+
+# Build artifacts not needed by consumers
+*.tsbuildinfo
+
+# Dev dotfiles
+.vscode/
+.github/
+.claude/
+.eslintrc*
+.prettierrc*

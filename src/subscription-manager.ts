@@ -213,8 +213,6 @@ export class SubscriptionManager {
       console.warn(`Warning: Variable '${variableName}' samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
     }
 
-    // TODO: Add batch operation support for adding multiple variables at once
-    // TODO: Consider rate limiting for rapid successive variable additions
     // Add to desired variables
     subscription.desiredVariables.add(variableName);
 
@@ -430,7 +428,6 @@ export class SubscriptionManager {
     nodeId: string, 
     variableHierarchy: Map<string, { nodeId: string; path: string[] }>
   ): string | undefined {
-    // TODO: Consider indexing by nodeId for better performance (O(1) vs O(n))
     for (const [varName, info] of variableHierarchy) {
       if (info.nodeId === nodeId) {
         return varName;
