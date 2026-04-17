@@ -4,7 +4,6 @@ import { OpcuaConnection } from '../../src/connection.js';
 import { VariableManager } from '../../src/variable-manager.js';
 import { VariableHierarchy } from '../../src/variable-hierarchy.js';
 import { VariablePathParser } from '../../src/variable-hierarchy.js';
-import test, { mock } from 'node:test';
 
 // Mock the dependencies
 vi.mock('../../src/connection.js');

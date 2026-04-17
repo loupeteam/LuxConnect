@@ -169,7 +169,7 @@ describe('Integration Tests - Real Server Communication', () => {
       try {
         await machine.writeVariable(varName, value);
         optionalResetCount++;
-      } catch (error) {
+      } catch {
         console.log(`   Optional reset skipped: ${varName}`);
       }
     }
@@ -249,12 +249,12 @@ describe('Integration Tests - Real Server Communication', () => {
         for (const handle of Object.keys(subscriptions)) {
           try {
             await machine.unsubscribe(handle);
-          } catch (error) {
+          } catch {
             // Ignore cleanup errors
           }
         }
       }
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
   });
@@ -271,7 +271,7 @@ describe('Integration Tests - Real Server Communication', () => {
       } else {
         return currentValue === expectedValue;
       }
-    } catch (error) {
+    } catch {
       return false; // Variable doesn't exist or can't be read
     }
   }
@@ -1446,7 +1446,7 @@ describe('Integration Tests - Real Server Communication', () => {
         for (const handle of createdSubscriptions) {
           try {
             await machine.unsubscribe(handle);
-          } catch (error) {
+          } catch {
             // Ignore cleanup errors
           }
         }

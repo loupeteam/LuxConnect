@@ -102,7 +102,7 @@ describe('OpcuaConnection - Core Functionality', () => {
 
       try {
         await connection.connect();
-      } catch (error) {
+      } catch {
         // Expected to fail in test environment due to WebSocket/TLS issues
       }
       

@@ -102,10 +102,10 @@ describe('OpcuaMachine (Cross-Platform)', () => {
 
   describe('error handling', () => {
     it('should handle invalid variable names gracefully', () => {
-      // These should either work or fail gracefully
+      // Invalid variable names now throw — callers are responsible for validation
       expect(() => {
         machine.initCyclicRead('::Invalid::::Format')
-      }).not.toThrow() // Should be caught and logged
+      }).toThrow()
     })
   })
 

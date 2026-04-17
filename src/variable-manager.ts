@@ -853,7 +853,7 @@ export class VariableManager {
     try {
       const parsedPath = VariablePathParser.parse(name);
       return VariablePathParser.reconstruct(parsedPath);
-    } catch (error) {
+    } catch {
       // If parsing fails, return the original name as fallback
       return name;
     }

@@ -689,7 +689,7 @@ export class SubscriptionManager {
         const successCount = results.responses.filter((r: {body?: {monitoredItemId?: unknown}}) => r.body?.monitoredItemId).length;
         console.log(`✅ Batch add completed: ${successCount}/${results.responses.length} items registered`);
       }
-    } catch (batchError) {
+    } catch {
       // Fallback to individual operations if batch is not supported
       console.log('Batch operation not supported, falling back to individual operations...');
       
@@ -796,7 +796,7 @@ export class SubscriptionManager {
       }
       
       console.log(`✅ Batch remove completed: ${itemsToRemove.length} items removed`);
-    } catch (batchError) {
+    } catch {
       // Fallback to individual operations if batch is not supported
       console.log('Batch delete not supported, falling back to individual operations...');
       

@@ -63,7 +63,7 @@ describe('Core Integration Tests - Working Features Only', () => {
       // Reset variables to baseline values for consistent testing
       await resetCoreVariables();
       
-    } catch (error) {
+    } catch {
       console.warn('⚠️ Server not available - skipping tests');
       isConnected = false;
     }
@@ -87,7 +87,7 @@ describe('Core Integration Tests - Working Features Only', () => {
       } else {
         return currentValue === expectedValue;
       }
-    } catch (error) {
+    } catch {
       return false;
     }
   }

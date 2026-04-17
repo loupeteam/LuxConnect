@@ -677,7 +677,7 @@ export class OpcuaConnection {
         // Log for developer debugging
         try {
           console.error(`API request failed: ${response.status} ${response.statusText} - ${bodyText}`, { url, endpoint, options });
-        } catch (logErr) {
+        } catch {
           // ignore logging failures
         }
 

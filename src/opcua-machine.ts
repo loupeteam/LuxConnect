@@ -131,9 +131,14 @@ export class OpcuaMachine {
           (target as unknown as Record<string | symbol, OpcuaValue>)[prop] = value;
           return true;
         }
-        // Direct property assignment (machine.MyVar = x) is not supported —
-        // use machine.writeVariable('MyVar', x) instead.
-        return false;
+        // Convenience: machine.MyVar = x writes the variable.
+        // Note: only works for top-level variables — scoped paths (tasks, programs)
+        // need machine.writeVariable('Program:Task.Var', x) instead.
+        if (typeof value !== 'function') {
+          target.writeVariable(prop.toString(), value).catch(console.error);
+        }
+        // Always return true — returning false throws TypeError in strict mode.
+        return true;
       }
     });
   }
@@ -388,9 +393,13 @@ export class OpcuaMachine {
    * @param samplingInterval Optional sampling interval in ms (default: 100ms for fast updates)
    * @returns Subscription handle for unsubscribing
    */
-  public async subscribe(varName: string, callback: (value: OpcuaValue) => void, samplingInterval: number = 100): Promise<string> {
+  public async subscribe(varName: string, callback: (value: OpcuaValue) => void, samplingIntervalOrOptions: number | { samplingInterval?: number; publishingInterval?: number;[key: string]: unknown } = 100): Promise<string> {
+    const samplingInterval = typeof samplingIntervalOrOptions === 'number'
+      ? samplingIntervalOrOptions
+      : (samplingIntervalOrOptions?.samplingInterval ?? samplingIntervalOrOptions?.publishingInterval ?? 100);
+
     // Generate unique subscription handle for this variable+callback combination
-    const subscriptionHandle = `${varName}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const subscriptionHandle = `${varName}_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     
     // Create read group name based on sampling interval to group variables with same rate
     const readGroupName = `subscriptions_${samplingInterval}ms`;
@@ -611,20 +620,29 @@ export class OpcuaMachine {
     return new Proxy(data, {
       get: (obj, prop: string | symbol) => {
         if (typeof prop !== 'string') return undefined;
-        
+
         // If the property exists in the scope data, return it
         if (prop in obj) {
           return obj[prop];
         }
-        
+
         return undefined;
       },
-      
+
+      set: (_obj, prop: string | symbol, value: OpcuaValue) => {
+        if (typeof prop === 'string' && typeof value !== 'function') {
+          // machine[task].myVar = x  →  writes  appModule::scope:myVar
+          target.writeVariable(`${appModule}::${scope}:${prop}`, value).catch(console.error);
+        }
+        // Always return true — returning false throws TypeError in strict mode.
+        return true;
+      },
+
       // Allow enumeration of properties
       ownKeys: (obj) => {
         return Object.keys(obj);
       },
-      
+
       getOwnPropertyDescriptor: (obj, prop) => {
         if (prop in obj) {
           return {
