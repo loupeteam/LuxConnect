@@ -9,7 +9,8 @@ import {
   ErrorHandler,
   ErrorPolicy,
   OpcuaValue,
-  OpcuaObject
+  OpcuaObject,
+  OpcuaVariable
 } from './types.js';
 
 /**
@@ -68,6 +69,9 @@ export class OpcuaMachine {
     this.variableManager.setDefaultNamespace(this.defaultNamespace);
     this.variableManager.setDefaultApplication(this.defaultApplication);
     this.variableManager.setDefaultTask(this.defaultTask);
+    if (config.taskNameMaxLength !== undefined) {
+      this.variableManager.setTaskNameMaxLength(config.taskNameMaxLength);
+    }
     
     // Create default read group
     this.readGroups.set('default', {
@@ -581,6 +585,14 @@ export class OpcuaMachine {
    */
   public getGlobalState(): OpcuaObject {
     return this.variableManager.getGlobalState();
+  }
+
+  /**
+   * Get all subscribed variables with their current value, timestamp, and quality.
+   * quality: 'good' | 'uncertain' | 'bad' | 'unknown'
+   */
+  public getAllVariables(): Map<string, OpcuaVariable> {
+    return this.variableManager.getAllVariables();
   }
 
   /**

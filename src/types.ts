@@ -102,6 +102,13 @@ export interface ConnectionConfig {
   sessionTimeout?: number;
   enableWebSocket?: boolean;
   keepAliveInterval?: number;
+  /**
+   * Maximum length for task/scope names in local variable nodeIds.
+   * When set, task names longer than this limit are truncated before building the OPC UA nodeId.
+   * Only applies to local (task-scoped) variables — global (AsGlobalPV) variables are unaffected.
+   * Example: taskNameMaxLength=10 maps "PurgeControl:IO.do.x" → "PurgeContr:IO.do.x"
+   */
+  taskNameMaxLength?: number;
 }
 
 /**

@@ -30,6 +30,7 @@ export class VariableManager {
   private defaultNamespace: string = 'ns=5;s=';
   private defaultApplication: string = ''; // Empty means use parser default
   private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
+  private taskNameMaxLength: number | undefined = undefined; // Optional truncation limit for task/scope names
 
   constructor(connection: OpcuaConnection) {
     this.connection = connection;
@@ -54,6 +55,14 @@ export class VariableManager {
    */
   public setDefaultTask(task: string): void {
     this.defaultTask = task;
+  }
+
+  /**
+   * Set the maximum length for task/scope names in local variable nodeIds.
+   * Task names exceeding this length are truncated. Pass undefined to disable.
+   */
+  public setTaskNameMaxLength(limit: number | undefined): void {
+    this.taskNameMaxLength = limit;
   }
 
   /**
@@ -971,7 +980,8 @@ export class VariableManager {
     return VariablePathParser.buildNodeId(varName, {
       namespace: this.defaultNamespace,
       defaultApplication: this.defaultApplication,
-      defaultTask: this.defaultTask
+      defaultTask: this.defaultTask,
+      taskNameMaxLength: this.taskNameMaxLength
     });
   }
 }

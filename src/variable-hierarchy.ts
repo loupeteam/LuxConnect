@@ -291,6 +291,7 @@ export class VariablePathParser {
     nodeId?: string;
     defaultApplication?: string;
     defaultTask?: string;
+    taskNameMaxLength?: number;
   } = {}): string {
     // If explicit nodeId provided, use it
     if (options.nodeId) {
@@ -325,10 +326,19 @@ export class VariablePathParser {
       if (!parsedPath.task) {
         parsedPath.task = 'AsGlobalPV';
       }
+
+      // Truncate task name for local variables when a limit is configured
+      if (
+        options.taskNameMaxLength !== undefined &&
+        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task.length > options.taskNameMaxLength
+      ) {
+        parsedPath.task = parsedPath.task.slice(0, options.taskNameMaxLength);
+      }
       
       // Reconstruct the normalized variable name
       normalizedVarName = VariablePathParser.reconstruct(parsedPath);
-    } catch (error) {
+    } catch {
       // If parsing fails, use the variable name as-is
       normalizedVarName = varName;
     }
