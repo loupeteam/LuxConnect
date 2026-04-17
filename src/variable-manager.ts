@@ -981,7 +981,7 @@ export class VariableManager {
       namespace: this.defaultNamespace,
       defaultApplication: this.defaultApplication,
       defaultTask: this.defaultTask,
-      taskNameMaxLength: this.taskNameMaxLength
+      ...(this.taskNameMaxLength !== undefined && { taskNameMaxLength: this.taskNameMaxLength })
     });
   }
 }
