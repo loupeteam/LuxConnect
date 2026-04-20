@@ -180,6 +180,7 @@ export class OpcuaConnection {
   private errorHandlers: ErrorHandler[] = [];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private messageHandlers: Array<(data: any) => void> = [];
+  private userChangeHandlers: Array<(username: string | undefined) => void> = [];
 
   private baseUrl: string;
   
@@ -459,6 +460,7 @@ export class OpcuaConnection {
         await this.connectWebSocket();
       }
 
+      this.fireUserChanged(this.sessionInfo?.username);
       this.setState(ConnectionState.CONNECTED);
     } catch (error) {
       this.setState(ConnectionState.DISCONNECTED);
@@ -624,11 +626,13 @@ export class OpcuaConnection {
 
       // Update session info with new user details
       this.sessionInfo.username = username || 'anonymous';
-      
+
       // Note: We don't update roles here as they're not returned in the PATCH response
       // The roles would be updated on the next authenticated request or could be fetched separately
-      
+
       console.log(`✅ Successfully changed user to: ${this.sessionInfo.username}`);
+
+      this.fireUserChanged(this.sessionInfo.username);
 
       // Emit connection state change to notify subscriptions may need to be re-established
       // (as mentioned in the API docs, changing user may cause subscription discontinuities)
@@ -713,6 +717,24 @@ export class OpcuaConnection {
    */
   public onConnectionStateChanged(handler: ConnectionStateHandler): void {
     this.connectionStateHandlers.push(handler);
+  }
+
+  /**
+   * Register a handler that fires whenever the authenticated user changes.
+   * Returns an unsubscribe function.
+   */
+  public onUserChanged(handler: (username: string | undefined) => void): () => void {
+    this.userChangeHandlers.push(handler);
+    return () => {
+      const idx = this.userChangeHandlers.indexOf(handler);
+      if (idx !== -1) this.userChangeHandlers.splice(idx, 1);
+    };
+  }
+
+  private fireUserChanged(username: string | undefined): void {
+    for (const handler of this.userChangeHandlers) {
+      try { handler(username); } catch (e) { console.error('User change handler error:', e); }
+    }
   }
 
   /**

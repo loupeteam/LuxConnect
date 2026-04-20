@@ -194,6 +194,21 @@ export class OpcuaMachine {
   }
 
   /**
+   * Get the username of the currently authenticated user, or undefined if anonymous / not connected.
+   */
+  public getCurrentUser(): string | undefined {
+    return this.connection.getSessionInfo()?.username;
+  }
+
+  /**
+   * Register a handler that fires whenever the authenticated user changes (including on connect).
+   * Returns an unsubscribe function.
+   */
+  public onUserChanged(handler: (username: string | undefined) => void): () => void {
+    return this.connection.onUserChanged(handler);
+  }
+
+  /**
    * Check if currently connected
    */
   public get isConnected(): boolean {
