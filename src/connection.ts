@@ -196,6 +196,9 @@ export class OpcuaConnection {
   // before starting a new session (prevents race in React Strict Mode double-invoke)
   private _pendingDisconnect: Promise<void> | null = null;
 
+  // Set to true when connect() is called; cleared on disconnect(). Controls retry behavior.
+  private _retryEnabled = false;
+
   constructor(config: ConnectionConfig) {
     this.config = {
       protocol: 'http',           // Default to HTTP
@@ -422,6 +425,8 @@ export class OpcuaConnection {
       await this._pendingDisconnect;
     }
 
+    this._retryEnabled = true;
+
     try {
       this.setState(ConnectionState.CONNECTING);
 
@@ -458,6 +463,9 @@ export class OpcuaConnection {
     } catch (error) {
       this.setState(ConnectionState.DISCONNECTED);
       this.handleError(error as Error);
+      // Schedule background retry so the connection is re-attempted indefinitely
+      // even when the initial connect() call fails.
+      this.scheduleReconnect();
       throw error;
     }
   }
@@ -471,6 +479,7 @@ export class OpcuaConnection {
   }
 
   private async _doDisconnect(): Promise<void> {
+    this._retryEnabled = false;
     this.setState(ConnectionState.DISCONNECTING);
 
     // Stop timers
@@ -1334,11 +1343,11 @@ Auth data: ${JSON.stringify(authData)}`);
       return;
     }
     
-    // Don't schedule reconnection if we're already reconnecting or disconnecting
-    if (this.connectionState === ConnectionState.RECONNECTING || 
-        this.connectionState === ConnectionState.DISCONNECTING ||
-        this.connectionState === ConnectionState.DISCONNECTED) {
-      console.log(`Skipping reconnection - current state: ${this.connectionState}`);
+    // Don't schedule reconnection if we're disconnecting or retries have been disabled
+    if (!this._retryEnabled ||
+        this.connectionState === ConnectionState.RECONNECTING ||
+        this.connectionState === ConnectionState.DISCONNECTING) {
+      console.log(`Skipping reconnection - retryEnabled: ${this._retryEnabled}, state: ${this.connectionState}`);
       return;
     }
 
@@ -1372,10 +1381,9 @@ Auth data: ${JSON.stringify(authData)}`);
         console.error('Reconnection failed:', error);
         this.handleError(error as Error);
         
-        // Only schedule another reconnect if we're still supposed to be connected
-        if (this.connectionState !== ConnectionState.DISCONNECTED && 
-            this.connectionState !== ConnectionState.DISCONNECTING) {
-          this.scheduleReconnect(); // Try again
+        // Retry indefinitely as long as connect() was called and disconnect() has not been called
+        if (this._retryEnabled) {
+          this.scheduleReconnect();
         }
       }
     }, 5000); // Retry after 5 seconds
