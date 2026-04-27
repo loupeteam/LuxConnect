@@ -174,7 +174,9 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
       writeValue: vi.fn(),
       getGlobalState: vi.fn().mockReturnValue({}),
       updateVariableValue: vi.fn(),
-      updateVariableFromNotification: vi.fn() // Add this for WebSocket notifications
+      updateVariableFromNotification: vi.fn(), // Add this for WebSocket notifications
+      getTaskNameMaxLength: vi.fn().mockReturnValue(undefined),
+      setTaskNameMaxLength: vi.fn()
     };
 
     // Mock constructors

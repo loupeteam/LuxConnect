@@ -66,6 +66,13 @@ export class VariableManager {
   }
 
   /**
+   * Get the configured task/scope name length limit, or undefined if unset.
+   */
+  public getTaskNameMaxLength(): number | undefined {
+    return this.taskNameMaxLength;
+  }
+
+  /**
    * Set error handling policy
    * @param policy 'default' - log errors and return cached values, 'strict' - throw unhandled rejections, 'silent' - return cached values without logging
    */
@@ -684,15 +691,30 @@ export class VariableManager {
         const failures: string[] = [];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any        
         results.responses.forEach((result: any, index: number) => {
-          if (result.status >= 400 || (result.body && result.body.status?.code !== 0)) {
-            const errorMsg = result.body?.status?.code?.description || result.statusText || 'Unknown error';
-            failures.push(`${writes[index].path}: ${errorMsg}`);
+          const httpFailed = typeof result?.status === 'number' && result.status >= 400;
+          const opcuaStatus = result?.body?.status;
+          // OPC UA status code may be a number or an object with `code`.
+          const opcuaCode = typeof opcuaStatus === 'number'
+            ? opcuaStatus
+            : (typeof opcuaStatus?.code === 'number' ? opcuaStatus.code : undefined);
+          const opcuaFailed = opcuaCode !== undefined && opcuaCode !== 0;
+          if (httpFailed || opcuaFailed) {
+            const errorMsg =
+              result?.body?.status?.description ??
+              result?.body?.message ??
+              result?.statusText ??
+              `status=${result?.status ?? '?'} opcua=${opcuaCode ?? '?'}`;
+            const detail = `${writes[index].path} (nodeId=${writes[index].nodeId}): ${errorMsg}`;
+            failures.push(detail);
+            console.warn(`Batch write failed for ${detail}`, result?.body ?? result);
           }
         });
 
         if (failures.length > 0) {
           throw new Error(`Failed to write some parts of complex variable '${originalName}':\n${failures.join('\n')}`);
         }
+      } else {
+        console.warn(`Batch write for '${originalName}' returned no responses array; raw result:`, results);
       }
 
       // Update hierarchy for all successful writes

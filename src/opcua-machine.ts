@@ -685,21 +685,29 @@ export class OpcuaMachine {
 
   private buildNodeId(varName: string, options: VariableOptions): string {
     // Pass instance-specific defaults and per-call options to the centralized method
-    const buildOptions: { 
-      namespace?: string; 
-      nodeId?: string; 
-      defaultApplication?: string; 
-      defaultTask?: string; 
+    const buildOptions: {
+      namespace?: string;
+      nodeId?: string;
+      defaultApplication?: string;
+      defaultTask?: string;
+      taskNameMaxLength?: number;
     } = {
       namespace: options.namespace || this.defaultNamespace,
       defaultApplication: this.defaultApplication,
       defaultTask: this.defaultTask
     };
-    
+
     if (options.nodeId) {
       buildOptions.nodeId = options.nodeId;
     }
-    
+
+    // Honor the task/scope name length limit configured on the VariableManager
+    // so nodeIds built directly here match those built via the manager.
+    const taskNameMaxLength = this.variableManager.getTaskNameMaxLength();
+    if (taskNameMaxLength !== undefined) {
+      buildOptions.taskNameMaxLength = taskNameMaxLength;
+    }
+
     return VariablePathParser.buildNodeId(varName, buildOptions);
   }
 

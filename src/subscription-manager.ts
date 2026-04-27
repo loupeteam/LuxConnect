@@ -23,6 +23,14 @@ interface MonitoredItemInfo {
   clientHandle: number;
   nodeId: string;
   variableName?: string; // For registered variables
+  /**
+   * Whether we've received and inspected the first notification for this
+   * monitored item. The first notification typically reports whether the
+   * server could actually resolve the node (e.g. BadNodeIdUnknown for a
+   * misspelled variable), so we use it to surface bad-variable warnings
+   * that the subscribe call itself doesn't tell us about.
+   */
+  firstNotificationSeen?: boolean;
 }
 
 /**
@@ -36,6 +44,18 @@ export class SubscriptionManager {
   private subscriptions = new Map<string, SubscriptionInfo>();
   private clientHandleCounter = 1;
   private clientHandleMap = new Map<number, MonitoredItemInfo>();
+  /**
+   * Per-subscription serialization chain. consolidateSubscription mutates
+   * monitoredItems based on a snapshot taken at the start of the call, but
+   * the actual server delete/add round-trips are async. If two consolidation
+   * passes run concurrently for the same subscription they race: both compute
+   * overlapping toRemove/toAdd sets from stale snapshots, and the second
+   * batch-delete 404s with 'Could not find monitoredItemId' because the
+   * first call already removed those items on the server. Chaining all
+   * consolidations through a per-subscription promise ensures each pass
+   * sees a fully reconciled state.
+   */
+  private consolidationChains = new Map<string, Promise<void>>();
 
   constructor(connection: OpcuaConnection, variableManager: VariableManager, logger?: Logger) {
     this.connection = connection;
@@ -234,8 +254,28 @@ export class SubscriptionManager {
    * Each subscription maintains its own variable list for proper isolation,
    * but leverages VariableManager for consistent parsing.
    * This method is exposed publicly to allow external batch updates to subscriptions.
+   *
+   * Calls are serialized per subscription via `consolidationChains` so that
+   * back-to-back add/remove flurries (e.g. React reconciliation) don't issue
+   * overlapping DELETEs against the server.
    */
-  public async consolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
+  public consolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
+    const prev = this.consolidationChains.get(subscription.name) ?? Promise.resolve();
+    const next = prev
+      .catch(() => { /* prior consolidation errors are surfaced to their own awaiter */ })
+      .then(() => this.doConsolidateSubscription(subscription));
+    // Track the latest link; clean up once it settles so the map doesn't grow
+    // unbounded for long-lived subscriptions.
+    this.consolidationChains.set(subscription.name, next);
+    next.finally(() => {
+      if (this.consolidationChains.get(subscription.name) === next) {
+        this.consolidationChains.delete(subscription.name);
+      }
+    });
+    return next;
+  }
+
+  private async doConsolidateSubscription(subscription: SubscriptionInfo): Promise<void> {
     // Build hierarchy map for THIS subscription's variables only
     const subscriptionHierarchy = new Map<string, { nodeId: string; path: string[] }>();
 
@@ -375,16 +415,31 @@ export class SubscriptionManager {
     try {
       // Use the proper VariablePathParser for consistent results
       const parsedPath = VariablePathParser.parse(variableName);
-      
+
+      // Apply the same task-name truncation used when building nodeIds so that
+      // hierarchy paths used for subscription consolidation match the actual
+      // nodeIds. Otherwise two variables that resolve to the same truncated
+      // task could appear as siblings in different hierarchy branches and fail
+      // to consolidate correctly.
+      const taskNameMaxLength = this.variableManager.getTaskNameMaxLength();
+      if (
+        taskNameMaxLength !== undefined &&
+        parsedPath.task &&
+        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task.length > taskNameMaxLength
+      ) {
+        parsedPath.task = parsedPath.task.slice(0, taskNameMaxLength);
+      }
+
       // Convert VariablePath to simple hierarchy path for subscription consolidation
       // This represents the logical hierarchy depth for parent/child optimization
       const hierarchyParts: string[] = [];
-      
+
       // Add application if present
       if (parsedPath.application) {
         hierarchyParts.push(parsedPath.application);
       }
-      
+
       // Add task if not the default AsGlobalPV
       if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
         hierarchyParts.push(parsedPath.task);
@@ -659,27 +714,56 @@ export class SubscriptionManager {
       const results = await response.json();
       
       if (results.responses && Array.isArray(results.responses)) {
+        const failures: Array<{ nodeId: string; status?: number; statusText?: string; body?: unknown }> = [];
+        let successCount = 0;
         // Process batch results
         for (let i = 0; i < results.responses.length; i++) {
           const response = results.responses[i];
           const originalItem = monitoredItemsParams[i];
-          
-          if (response.body && response.body.monitoredItemId) {
-            const monitoredItemInfo: MonitoredItemInfo = {
-              monitoredItemId: response.body.monitoredItemId,
-              clientHandle: originalItem._metadata.clientHandle,  // Use our generated clientHandle
-              nodeId: originalItem._metadata.nodeId,
-              ...(originalItem._metadata.variableName && { variableName: originalItem._metadata.variableName })
-            };
 
-            subscription.monitoredItems.set(response.body.monitoredItemId, monitoredItemInfo);
-            this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
+          // Treat any 2xx (or missing) HTTP status as success. Some firmwares
+          // respond with 204 No Content and no body for successful adds, so we
+          // can't require `monitoredItemId` to decide success.
+          const httpStatus: number | undefined = response?.status;
+          const httpOk = httpStatus === undefined || (httpStatus >= 200 && httpStatus < 300);
+
+          if (httpOk) {
+            successCount++;
+            // If the server included the monitoredItemId, track it locally so
+            // we can manage/remove it later. Otherwise we just trust the server
+            // accepted it but won't be able to remove it individually.
+            const monitoredItemId = response?.body?.monitoredItemId;
+            if (monitoredItemId !== undefined && monitoredItemId !== null) {
+              const monitoredItemInfo: MonitoredItemInfo = {
+                monitoredItemId,
+                clientHandle: originalItem._metadata.clientHandle,
+                nodeId: originalItem._metadata.nodeId,
+                ...(originalItem._metadata.variableName && { variableName: originalItem._metadata.variableName })
+              };
+              subscription.monitoredItems.set(monitoredItemId, monitoredItemInfo);
+              this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
+            } else {
+              this.log.debug(
+                `Add accepted (status=${httpStatus ?? '?'}) for ${originalItem._metadata.nodeId} ` +
+                `but no monitoredItemId returned; not tracked locally.`
+              );
+            }
           } else {
-            this.log.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
+            failures.push({
+              nodeId: originalItem._metadata.nodeId,
+              status: httpStatus,
+              statusText: response?.statusText,
+              body: response?.body
+            });
+            this.log.warn(
+              `Failed to create monitored item for ${originalItem._metadata.nodeId} ` +
+              `(status=${httpStatus ?? '?'}${response?.statusText ? ' ' + response.statusText : ''}):`,
+              response?.body ?? response
+            );
             // If the server says the subscription no longer exists, throw so the caller
             // can delete and re-create it rather than silently losing the variable.
             const msg: string = response?.body?.message ?? '';
-            if (response.status === 404 && msg.toLowerCase().includes('subscriptionid')) {
+            if (httpStatus === 404 && msg.toLowerCase().includes('subscriptionid')) {
               throw new LuxConnectError(
                 LuxConnectErrorCode.SUBSCRIPTION_NOT_FOUND,
                 `Subscription ${subscription.subscriptionId} not found on server (404). Will retry.`
@@ -687,8 +771,15 @@ export class SubscriptionManager {
             }
           }
         }
-        const successCount = results.responses.filter((r: {body?: {monitoredItemId?: unknown}}) => r.body?.monitoredItemId).length;
+        if (failures.length > 0) {
+          this.log.warn(
+            `⚠️ Batch add: ${failures.length}/${results.responses.length} monitored items FAILED for subscription ${subscription.subscriptionId}:`,
+            failures
+          );
+        }
         this.log.info(`✅ Batch add completed: ${successCount}/${results.responses.length} items registered`);
+      } else {
+        this.log.warn('Batch add returned no responses array; raw result:', results);
       }
     } catch (err) {
       // Don't swallow our explicit "subscription is gone, please recreate" signal.
@@ -784,7 +875,7 @@ export class SubscriptionManager {
         }
       }));
 
-      await this.connection.apiRequest(
+      const removeResponse = await this.connection.apiRequest(
         `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/$batch`, 
         {
           method: 'POST',  // Batch operations are always POST
@@ -794,13 +885,54 @@ export class SubscriptionManager {
         }
       );
 
-      // Clean up local state
+      // Inspect per-item responses so we surface bad statuses instead of
+      // silently reporting success when the server rejected individual deletes.
+      let removeResults: { responses?: unknown[] } | undefined;
+      try {
+        removeResults = await removeResponse.json();
+      } catch {
+        removeResults = undefined;
+      }
+
+      const failures: Array<{ nodeId: string; monitoredItemId: number; status?: number; body?: unknown }> = [];
+      if (removeResults && Array.isArray(removeResults.responses)) {
+        for (let i = 0; i < removeResults.responses.length; i++) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const r = removeResults.responses[i] as any;
+          const item = itemsToRemove[i];
+          const ok = r && (r.status === undefined || (r.status >= 200 && r.status < 300));
+          if (!ok) {
+            failures.push({
+              nodeId: item.nodeId,
+              monitoredItemId: item.monitoredItemId,
+              status: r?.status,
+              body: r?.body
+            });
+            this.log.warn(
+              `Failed to remove monitored item ${item.monitoredItemId} (${item.nodeId}) ` +
+              `(status=${r?.status ?? '?'}):`,
+              r?.body ?? r
+            );
+          }
+        }
+      }
+
+      // Clean up local state for items the server actually removed (or for which
+      // we have no per-item response, to preserve previous behavior).
+      const failedIds = new Set(failures.map(f => f.monitoredItemId));
       for (const item of itemsToRemove) {
+        if (failedIds.has(item.monitoredItemId)) continue;
         subscription.monitoredItems.delete(item.monitoredItemId);
         this.clientHandleMap.delete(item.clientHandle);
       }
-      
-      console.log(`✅ Batch remove completed: ${itemsToRemove.length} items removed`);
+
+      const removed = itemsToRemove.length - failures.length;
+      if (failures.length > 0) {
+        this.log.warn(
+          `⚠️ Batch remove: ${failures.length}/${itemsToRemove.length} monitored items FAILED for subscription ${subscription.subscriptionId}`
+        );
+      }
+      console.log(`✅ Batch remove completed: ${removed}/${itemsToRemove.length} items removed`);
     } catch (err) {
       // Fallback to individual operations if batch is not supported by the server.
       this.log.warn('Batch remove failed, falling back to individual operations:', err);
@@ -894,7 +1026,28 @@ export class SubscriptionManager {
     if (!monitoredItem) return;
 
     const timestamp = new Date(dataNotification.serverTimestamp || Date.now());
-    const quality = this.mapQualityCode(dataNotification.status?.code || 0);
+    const statusCode = dataNotification.status?.code ?? 0;
+    const quality = this.mapQualityCode(statusCode);
+
+    // The mapp Connect / OPC UA server doesn't reject a subscribe for a
+    // missing variable; instead the very first DataChangeNotification carries
+    // a non-zero status (typically BadNodeIdUnknown = 0x80340000). Log that
+    // exactly once per monitored item so misspelled / non-existent variables
+    // are visible without spamming on every subsequent (still-bad) update.
+    if (!monitoredItem.firstNotificationSeen) {
+      monitoredItem.firstNotificationSeen = true;
+      if (statusCode !== 0) {
+        const symbol = dataNotification.status?.symbol;
+        const hex = '0x' + (statusCode >>> 0).toString(16).toUpperCase();
+        const label = monitoredItem.variableName
+          ? `'${monitoredItem.variableName}' (${monitoredItem.nodeId})`
+          : monitoredItem.nodeId;
+        this.log.warn(
+          `⚠️ First notification for ${label} reports bad/uncertain status ` +
+          `${symbol ?? ''} (${hex}). The variable may not exist on the server.`
+        );
+      }
+    }
 
     // Update variable manager if this is a registered variable
     if (monitoredItem.variableName) {
