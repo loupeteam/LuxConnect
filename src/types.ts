@@ -109,6 +109,20 @@ export interface ConnectionConfig {
    * Example: taskNameMaxLength=10 maps "PurgeControl:IO.do.x" → "PurgeContr:IO.do.x"
    */
   taskNameMaxLength?: number;
+  /**
+   * Optional logger. Defaults to `console`. Pass `silentLogger` from
+   * `./logger.js` (or any compatible object) to silence diagnostics.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  logger?: any;
+  /**
+   * Optional session persistence store. Defaults to a `localStorage`-backed
+   * store so SPA navigations can reuse the existing connection session.
+   * Pass `false` to disable persistence (each `connect()` creates a fresh
+   * session) or a custom `SessionStore` implementation to plug in your own.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sessionStore?: any | false;
 }
 
 /**

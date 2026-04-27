@@ -1,6 +1,9 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
 import { VariablePathParser } from './variable-hierarchy.js';
+import { LuxConnectError, LuxConnectErrorCode } from './errors.js';
+import type { Logger } from './logger.js';
+import { silentLogger } from './logger.js';
 import { 
   SubscriptionOptions, 
   MonitoredItemOptions,
@@ -29,14 +32,21 @@ interface MonitoredItemInfo {
 export class SubscriptionManager {
   private connection: OpcuaConnection;
   private variableManager: VariableManager;
+  private readonly log: Logger;
   private subscriptions = new Map<string, SubscriptionInfo>();
   private clientHandleCounter = 1;
   private clientHandleMap = new Map<number, MonitoredItemInfo>();
 
-  constructor(connection: OpcuaConnection, variableManager: VariableManager) {
+  constructor(connection: OpcuaConnection, variableManager: VariableManager, logger?: Logger) {
     this.connection = connection;
     this.variableManager = variableManager;
-    this.setupWebSocketHandler();
+    // Reuse the connection's logger by default for unified output routing.
+    // Falls back to silentLogger if the connection doesn't expose one (e.g. test mocks).
+    this.log = logger ?? (typeof connection.getLogger === 'function' ? connection.getLogger() : silentLogger);
+    // Register the message handler once at construction. The connection's
+    // onMessage list is append-only, so we must NOT re-subscribe on every
+    // reconnect (would dispatch each notification N times after N reconnects).
+    this.setupWebSocketNotifications();
   }
 
   /**
@@ -48,21 +58,6 @@ export class SubscriptionManager {
   ): Promise<string> {
     if (this.subscriptions.has(name)) {
       throw new Error(`Subscription '${name}' already exists`);
-    }
-
-    return this.doCreateSubscription(name, options);
-  }
-
-  /**
-   * Create or update a named subscription (handles existing subscriptions gracefully)
-   */
-  public async createOrUpdateSubscription(
-    name: string, 
-    options: SubscriptionOptions = {}
-  ): Promise<string> {
-    // If subscription exists, delete it first
-    if (this.subscriptions.has(name)) {
-      await this.deleteSubscription(name);
     }
 
     return this.doCreateSubscription(name, options);
@@ -104,10 +99,7 @@ export class SubscriptionManager {
     };
 
     this.subscriptions.set(name, subscriptionInfo);
-    
-    // Register the subscription ID with the connection for orphaned subscription cleanup
-    this.connection.registerSubscription(result.subscriptionId);
-    
+
     return name;
   }
 
@@ -129,9 +121,6 @@ export class SubscriptionManager {
     await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}`, {
       method: 'DELETE'
     });
-
-    // Unregister the subscription ID from the connection
-    this.connection.unregisterSubscription(subscription.subscriptionId);
 
     this.subscriptions.delete(name);
   }
@@ -168,7 +157,7 @@ export class SubscriptionManager {
 
     // Warn about samplingInterval mismatches
     if (options.samplingInterval && options.samplingInterval !== subscription.parameters.publishingInterval) {
-      console.warn(`Warning: Variables samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
+      this.log.warn(`Warning: Variables samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
     }
 
     // Add all variables to desired set
@@ -210,7 +199,7 @@ export class SubscriptionManager {
 
     // Warn if trying to override samplingInterval - it should match subscription rate
     if (options.samplingInterval && options.samplingInterval !== subscription.parameters.publishingInterval) {
-      console.warn(`Warning: Variable '${variableName}' samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
+      this.log.warn(`Warning: Variable '${variableName}' samplingInterval (${options.samplingInterval}ms) differs from subscription '${subscriptionName}' publishingInterval (${subscription.parameters.publishingInterval}ms). All variables in a subscription should use the same rate. Consider using a separate subscription for different rates.`);
     }
 
     // Add to desired variables
@@ -410,7 +399,7 @@ export class SubscriptionManager {
       return hierarchyParts;
     } catch (error) {
       // Fallback to simple parsing if VariablePathParser fails
-      console.warn(`Failed to parse variable name '${variableName}' with VariablePathParser, using fallback:`, error);
+      this.log.warn(`Failed to parse variable name '${variableName}' with VariablePathParser, using fallback:`, error);
       const parts = variableName.split('.');
       return parts.slice(1); // Remove the first part
     }
@@ -466,7 +455,7 @@ export class SubscriptionManager {
    * This recreates all subscriptions and monitored items with the new session
    */
   public async recoverAllSubscriptions(): Promise<void> {
-    console.log('Recovering subscriptions after reconnection...');
+    this.log.info('Recovering subscriptions after reconnection...');
     
     // Store current subscription configurations
     const subscriptionConfigs: Array<{
@@ -487,39 +476,47 @@ export class SubscriptionManager {
     // Clear current subscriptions (they're invalid with the old session)
     this.clearAllSubscriptions();
     
-    console.log(`Recreating ${subscriptionConfigs.length} subscriptions...`);
+    this.log.info(`Recreating ${subscriptionConfigs.length} subscriptions...`);
     
     // Recreate each subscription
     for (const config of subscriptionConfigs) {
       try {
-        console.log(`Recreating subscription: ${config.name}`);
+        this.log.info(`Recreating subscription: ${config.name}`);
         
         // Create the subscription
         await this.createSubscription(config.name, config.parameters);
         const subscription = this.subscriptions.get(config.name);
         
         if (!subscription) {
-          console.error(`Failed to find recreated subscription: ${config.name}`);
+          this.log.error(`Failed to find recreated subscription: ${config.name}`);
           continue;
         }
-        
-        // Use individual operations for variable re-addition
-        // (Batch operations would require complex nodeId resolution that's already handled in addVariable)
-        for (const variableName of config.variables) {
+
+        // Re-add all variables in a single batched operation. addVariables
+        // adds them to the desired-set together and runs ONE consolidation,
+        // which produces a single $batch monitoredItems POST.
+        if (config.variables.size > 0) {
           try {
-            await this.addVariable(config.name, variableName);
+            await this.addVariables(config.name, Array.from(config.variables));
           } catch (error) {
-            console.warn(`Failed to re-add variable ${variableName} to subscription ${config.name}:`, error);
+            this.log.warn(`Batched re-add failed for subscription ${config.name}, falling back to per-variable:`, error);
+            for (const variableName of config.variables) {
+              try {
+                await this.addVariable(config.name, variableName);
+              } catch (e) {
+                this.log.warn(`Failed to re-add variable ${variableName} to subscription ${config.name}:`, e);
+              }
+            }
           }
         }
         
-        console.log(`✅ Recreated subscription: ${config.name} with ${config.variables.size} variables`);
+        this.log.info(`✅ Recreated subscription: ${config.name} with ${config.variables.size} variables`);
       } catch (error) {
-        console.error(`Failed to recreate subscription ${config.name}:`, error);
+        this.log.error(`Failed to recreate subscription ${config.name}:`, error);
       }
     }
     
-    console.log('Subscription recovery completed');
+    this.log.info('Subscription recovery completed');
   }
 
   /**
@@ -527,11 +524,12 @@ export class SubscriptionManager {
    * Used during reconnection when old subscriptions are invalid
    */
   public clearAllSubscriptions(): void {
-    console.log('Clearing all subscription state...');
+    this.log.info('Clearing all subscription state...');
     this.subscriptions.clear();
     this.clientHandleMap.clear();
     this.clientHandleCounter = 1;
-    console.log('Subscription state cleared');
+    this.orphanCleanupAttempted.clear();
+    this.log.info('Subscription state cleared');
   }
 
   /**
@@ -596,7 +594,7 @@ export class SubscriptionManager {
   ): Promise<void> {
     if (items.length === 0) return;
     
-    console.log(`Adding ${items.length} monitored items in batch...`);
+    this.log.info(`Adding ${items.length} monitored items in batch...`);
     
     // Prepare batch request
     const monitoredItemsParams = items.map(item => {
@@ -677,27 +675,34 @@ export class SubscriptionManager {
             subscription.monitoredItems.set(response.body.monitoredItemId, monitoredItemInfo);
             this.clientHandleMap.set(originalItem._metadata.clientHandle, monitoredItemInfo);
           } else {
-            console.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
+            this.log.warn(`Failed to create monitored item for ${originalItem._metadata.nodeId}:`, response);
             // If the server says the subscription no longer exists, throw so the caller
             // can delete and re-create it rather than silently losing the variable.
             const msg: string = response?.body?.message ?? '';
             if (response.status === 404 && msg.toLowerCase().includes('subscriptionid')) {
-              throw new Error(`Subscription ${subscription.subscriptionId} not found on server (404). Will retry.`);
+              throw new LuxConnectError(
+                LuxConnectErrorCode.SUBSCRIPTION_NOT_FOUND,
+                `Subscription ${subscription.subscriptionId} not found on server (404). Will retry.`
+              );
             }
           }
         }
         const successCount = results.responses.filter((r: {body?: {monitoredItemId?: unknown}}) => r.body?.monitoredItemId).length;
-        console.log(`✅ Batch add completed: ${successCount}/${results.responses.length} items registered`);
+        this.log.info(`✅ Batch add completed: ${successCount}/${results.responses.length} items registered`);
       }
-    } catch {
-      // Fallback to individual operations if batch is not supported
-      console.log('Batch operation not supported, falling back to individual operations...');
+    } catch (err) {
+      // Don't swallow our explicit "subscription is gone, please recreate" signal.
+      if (err instanceof LuxConnectError && err.code === LuxConnectErrorCode.SUBSCRIPTION_NOT_FOUND) {
+        throw err;
+      }
+      // Fallback to individual operations if batch is not supported by the server.
+      this.log.warn('Batch add failed, falling back to individual operations:', err);
       
       for (const item of items) {
         try {
           await this.addMonitoredItem(subscription, item.nodeId, item.options || {}, item.variableName);
         } catch (error) {
-          console.warn(`Failed to add monitored item ${item.nodeId}:`, error);
+          this.log.warn(`Failed to add monitored item ${item.nodeId}:`, error);
         }
       }
     }
@@ -745,7 +750,7 @@ export class SubscriptionManager {
   ): Promise<void> {
     if (nodeIds.length === 0) return;
     
-    console.log(`Removing ${nodeIds.length} monitored items in batch...`);
+    this.log.info(`Removing ${nodeIds.length} monitored items in batch...`);
     
     // Find monitored item IDs for the given node IDs
     const itemsToRemove: Array<{ monitoredItemId: number; clientHandle: number; nodeId: string }> = [];
@@ -764,7 +769,7 @@ export class SubscriptionManager {
     }
     
     if (itemsToRemove.length === 0) {
-      console.warn('No monitored items found for the given node IDs');
+      this.log.warn('No monitored items found for the given node IDs');
       return;
     }
 
@@ -796,34 +801,24 @@ export class SubscriptionManager {
       }
       
       console.log(`✅ Batch remove completed: ${itemsToRemove.length} items removed`);
-    } catch {
-      // Fallback to individual operations if batch is not supported
-      console.log('Batch delete not supported, falling back to individual operations...');
+    } catch (err) {
+      // Fallback to individual operations if batch is not supported by the server.
+      this.log.warn('Batch remove failed, falling back to individual operations:', err);
       
       for (const nodeId of nodeIds) {
         try {
           await this.removeMonitoredItem(subscription, nodeId);
         } catch (error) {
-          console.warn(`Failed to remove monitored item ${nodeId}:`, error);
+          this.log.warn(`Failed to remove monitored item ${nodeId}:`, error);
         }
       }
     }
   }
 
   /**
-   * Setup WebSocket message handler for subscription notifications
-   */
-  private setupWebSocketHandler(): void {
-    // Monitor connection state for WebSocket setup
-    this.connection.onConnectionStateChanged((state) => {
-      if (state === 'connected') {
-        this.setupWebSocketNotifications();
-      }
-    });
-  }
-
-  /**
-   * Setup WebSocket notification handling
+   * Setup WebSocket notification handling. Called ONCE from the constructor —
+   * the connection's onMessage list is append-only, so re-subscribing on every
+   * `connected` transition would dispatch each notification N times.
    */
   private setupWebSocketNotifications(): void {
     // Use the connection's message handler instead of direct WebSocket access
@@ -832,15 +827,41 @@ export class SubscriptionManager {
       if (message && message.DataNotifications && Array.isArray(message.DataNotifications)) {
         // Filter out stale messages from previous sessions
         if (this.isStaleMessage(message)) {
-          console.debug(`🚫 Ignoring stale WebSocket message from session ${message.sessionId} (current: ${this.connection.getSessionInfo()?.sessionId})`);
+          this.log.debug(`🚫 Ignoring stale WebSocket message from session ${message.sessionId} (current: ${this.connection.getSessionInfo()?.sessionId})`);
           return;
         }
-        
+
+        // Orphan-subscription cleanup: if the message references a subscription
+        // we don't own (e.g. left over from a previous page load that restored
+        // the same session), DELETE it on the server so it stops sending us
+        // notifications.
+        const subId = typeof message.subscriptionId === 'number'
+          ? message.subscriptionId
+          : undefined;
+        if (subId !== undefined && !this.ownsSubscription(subId)) {
+          if (!this.orphanCleanupAttempted.has(subId)) {
+            this.orphanCleanupAttempted.add(subId);
+            this.log.warn(`Detected orphaned subscription ${subId} from previous session — deleting`);
+            void this.connection.deleteServerSubscription(subId);
+          }
+          return;
+        }
+
         for (const dataNotification of message.DataNotifications) {
           this.handleDataNotification(dataNotification);
         }
       }
     });
+  }
+
+  /** Tracks subscription IDs we've already issued a DELETE for, to avoid spam. */
+  private orphanCleanupAttempted = new Set<number>();
+
+  private ownsSubscription(subscriptionId: number): boolean {
+    for (const sub of this.subscriptions.values()) {
+      if (sub.subscriptionId === subscriptionId) return true;
+    }
+    return false;
   }
 
   /**

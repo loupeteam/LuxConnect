@@ -172,3 +172,4 @@ error.log
 
 # Runtime configuration
 .runtime/
+src/build-info.ts

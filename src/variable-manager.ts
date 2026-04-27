@@ -861,6 +861,15 @@ export class VariableManager {
   private normalizeVariableName(name: string): string {
     try {
       const parsedPath = VariablePathParser.parse(name);
+      // Apply the same task-name truncation used when building nodeIds, so that
+      // hierarchy keys and nodeId strings always agree on the task name.
+      if (
+        this.taskNameMaxLength !== undefined &&
+        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task.length > this.taskNameMaxLength
+      ) {
+        parsedPath.task = parsedPath.task.slice(0, this.taskNameMaxLength);
+      }
       return VariablePathParser.reconstruct(parsedPath);
     } catch {
       // If parsing fails, return the original name as fallback

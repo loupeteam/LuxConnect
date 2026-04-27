@@ -69,8 +69,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
       onConnectionStateChanged: vi.fn(),
       onError: vi.fn(),
       getSessionInfo: vi.fn().mockReturnValue({ sessionId: 'mock-session-id' }),
-      registerSubscription: vi.fn(),
-      unregisterSubscription: vi.fn(),
       apiRequest: vi.fn().mockImplementation((url: string, options: any) => {
         // Mock subscription creation
         if (url.includes('/subscriptions') && !url.includes('/monitoredItems') && options?.method === 'POST') {
@@ -1085,14 +1083,7 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
     });
 
     it('should setup WebSocket handler on connection', () => {
-      // The constructor should have called onConnectionStateChanged to setup WebSocket handler
-      expect(mockConnection.onConnectionStateChanged).toHaveBeenCalled();
-      
-      // Simulate connection state change to 'connected' to trigger WebSocket setup
-      const stateChangeHandler = mockConnection.onConnectionStateChanged.mock.calls[0][0];
-      stateChangeHandler('connected');
-      
-      // Now onMessage should have been called during WebSocket setup
+      // The constructor should have registered the message handler directly.
       expect(mockConnection.onMessage).toHaveBeenCalled();
     });
 
@@ -1152,10 +1143,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
       });
 
       await subscriptionManager.addVariable('MockTest', variableName);
-
-      // Trigger WebSocket setup
-      const stateChangeHandler = mockConnection.onConnectionStateChanged.mock.calls[0][0];
-      stateChangeHandler('connected');
 
       // Simulate WebSocket message with data notification
       const messageHandler = mockConnection.onMessage.mock.calls[0][0];
@@ -1237,10 +1224,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
 
       await subscriptionManager.addVariable('MockTest', variableName);
 
-      // Trigger WebSocket setup
-      const stateChangeHandler = mockConnection.onConnectionStateChanged.mock.calls[0][0];
-      stateChangeHandler('connected');
-      
       const messageHandler = mockConnection.onMessage.mock.calls[0][0];
 
       // Test different status codes
@@ -1273,10 +1256,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
     });
 
     it('should ignore notifications for unknown client handles', async () => {
-      // Trigger WebSocket setup
-      const stateChangeHandler = mockConnection.onConnectionStateChanged.mock.calls[0][0];
-      stateChangeHandler('connected');
-      
       const messageHandler = mockConnection.onMessage.mock.calls[0][0];
       const mockNotification = {
         DataNotifications: [{
@@ -1294,10 +1273,6 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
     });
 
     it('should handle malformed WebSocket messages gracefully', () => {
-      // Trigger WebSocket setup
-      const stateChangeHandler = mockConnection.onConnectionStateChanged.mock.calls[0][0];
-      stateChangeHandler('connected');
-      
       const messageHandler = mockConnection.onMessage.mock.calls[0][0];
 
       // Test various malformed messages

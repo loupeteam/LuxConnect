@@ -150,18 +150,14 @@ export class OpcuaMachine {
   // Connection management (lux.js style)
   
   /**
-   * Connect to the OPC UA server
+   * Connect to the OPC UA server.
+   *
+   * Subscriptions for any pre-registered readGroup variables are built by
+   * the `connected` state handler in setupWebSocketHandler(), which fires
+   * on every (re)connect. We don't kick them off here.
    */
   public async connect(): Promise<void> {
     await this.connection.connect();
-
-    // All variables should already be registered from initCyclicRead calls
-    // Just create subscriptions for read groups that have variables
-    for (const [name, group] of this.readGroups) {
-      if (group.variables.size > 0 && group.options.enabled) {
-        await this.createOrUpdateSubscription(name);
-      }
-    }
   }
 
   /**
@@ -821,28 +817,63 @@ export class OpcuaMachine {
     group.subscriptionId = null;
   }
 
+  /**
+   * Last sessionId we observed in the `connected` state. Used to distinguish:
+   *   - new session (server reboot or session timeout): old server-side
+   *     subscriptions are gone with the session, so we must wipe local state
+   *     and rebuild;
+   *   - same session (transient WS drop, session survived): old server-side
+   *     subscriptions still exist, leave them alone.
+   */
+  private lastConnectedSessionId: string | null = null;
+
   private setupWebSocketHandler(): void {
-    // WebSocket notifications are now handled by SubscriptionManager
-    // No need for additional setup here since SubscriptionManager will
-    // automatically update VariableManager when notifications arrive
-    
-    // Monitor connection state for subscription recovery
+    // WebSocket notifications are handled inside SubscriptionManager.
+    // This handler ensures every active readGroup has a server-side
+    // subscription on every connected edge that opens a NEW session.
     this.connection.onConnectionStateChanged(async (state) => {
-      if (state === 'connected') {
-        // Check if this is a reconnection (we had subscriptions before)
-        const allSubscriptions = this.subscriptionManager.getAllSubscriptions();
-        if (allSubscriptions.size > 0) {
-          console.log('Connection restored - recovering subscriptions...');
-          try {
-            await this.subscriptionManager.recoverAllSubscriptions();
-            console.log('✅ Subscription recovery completed');
-          } catch (error) {
-            console.error('❌ Subscription recovery failed:', error);
-          }
+      if (state !== 'connected') {
+        if (state === 'reconnecting') {
+          console.log('Connection lost — will rebuild subscriptions on reconnect');
         }
-      } else if (state === 'reconnecting') {
-        console.log('Connection lost - subscriptions will be recovered after reconnection');
+        return;
       }
+
+      const currentSessionId = this.connection.getSessionInfo()?.sessionId ?? null;
+      const sessionChanged = currentSessionId !== this.lastConnectedSessionId;
+      this.lastConnectedSessionId = currentSessionId;
+
+      if (sessionChanged) {
+        // New session: any local subscription ids reference the dead session.
+        // Wipe local state; the rebuild loop below will recreate everything.
+        if (this.subscriptionManager.getAllSubscriptions().size > 0) {
+          console.log('New session detected — clearing stale subscription state');
+        }
+        this.subscriptionManager.clearAllSubscriptions();
+        for (const group of this.readGroups.values()) {
+          group.subscriptionId = null;
+        }
+      }
+
+      // Reconcile every active readGroup against SM. doCreateOrUpdateSubscription
+      // is idempotent: same-session no-ops when nothing changed, and creates
+      // any subscription that was deferred because hooks called subscribe()
+      // while disconnected.
+      const activeGroups = Array.from(this.readGroups.entries())
+        .filter(([, g]) => g.variables.size > 0 && g.options.enabled);
+
+      if (activeGroups.length === 0) return;
+
+      const action = sessionChanged ? 'building' : 'reconciling';
+      console.log(`Connected — ${action} ${activeGroups.length} subscription(s)...`);
+      for (const [name] of activeGroups) {
+        try {
+          await this.doCreateOrUpdateSubscription(name);
+        } catch (error) {
+          console.error(`Failed to (re)build subscription '${name}':`, error);
+        }
+      }
+      console.log('✅ Subscriptions ready');
     });
   }
 }

@@ -15,7 +15,9 @@
     "dist"
   ],
   "scripts": {
+    "prebuild": "node scripts/generate-build-info.js",
     "build": "tsc",
+    "predev": "node scripts/generate-build-info.js",
     "dev": "tsc --watch",
     "demo": "node scripts/serve-demo.js",
     "test": "vitest",

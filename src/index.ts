@@ -34,11 +34,28 @@
  * ```
  */
 
+// Build identification
+export { BUILD_TIMESTAMP, BUILD_TIMESTAMP_MS } from './build-info.js';
+import { BUILD_TIMESTAMP } from './build-info.js';
+// Log once on module load so consumers can verify which build is loaded.
+if (typeof console !== 'undefined') {
+  console.log(`[lux-opcua] build ${BUILD_TIMESTAMP}`);
+}
+
 // Main Machine class (lux.js style)
 export { OpcuaMachine } from './opcua-machine.js';
 
 // Core functionality classes
 export { OpcuaConnection } from './connection.js';
+
+// Pluggable infrastructure
+export { consoleLogger, silentLogger } from './logger.js';
+export type { Logger } from './logger.js';
+export {
+  LocalStorageSessionStore,
+  InMemorySessionStore,
+} from './session-store.js';
+export type { SessionStore, PersistedSession } from './session-store.js';
 
 // Error handling
 export {
