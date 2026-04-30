@@ -1049,6 +1049,62 @@ describe('Integration Tests - Real Server Communication', () => {
       expect(readValue).toBe(testValue);
       console.log(`✅ Nested struct member: ${testVar} = "${testValue}" ✓`);
     }, 10000);
+
+    test('should read the complete struct object from a parent struct path', async () => {
+      if (!isServerAvailable) return;
+
+      const parentVar = TEST_VARIABLES.struct1;
+
+      // Write known values to individual members first
+      const expectedMember1 = TEST_VALUES.integers[2];
+      const expectedMember3 = TEST_VALUES.strings[3];
+      await machine.writeVariable(TEST_VARIABLES.struct1Member1, expectedMember1);
+      await machine.writeVariable(TEST_VARIABLES.struct1Member3, expectedMember3);
+
+      // Read the parent struct path — should return the complete object
+      const result = await machine.readVariable(parentVar);
+
+      expect(result).not.toBeNull();
+      expect(typeof result).toBe('object');
+      expect((result as any).member1).toBe(expectedMember1);
+      expect((result as any).member3).toBe(expectedMember3);
+      console.log(`✅ Parent struct read: ${parentVar} = ${JSON.stringify(result)} ✓`);
+    }, 15000);
+
+    test('should subscribe to a parent struct path and receive the whole struct object', async () => {
+      if (!isServerAvailable) return;
+
+      const parentVar  = TEST_VARIABLES.struct1;
+      const memberVar  = TEST_VARIABLES.struct1Member1;
+      const testMember = TEST_VALUES.integers[4];
+
+      let receivedValue: unknown = undefined;
+      let callbackCount = 0;
+
+      const subscription = await machine.subscribe(parentVar, (value: unknown) => {
+        receivedValue = value;
+        callbackCount++;
+        console.log(`📡 Parent struct callback: ${parentVar} = ${JSON.stringify(value)}`);
+      });
+
+      // Wait for the initial snapshot callback
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      callbackCount = 0;
+
+      // Trigger a change by writing to a member
+      await machine.writeVariable(memberVar, testMember);
+
+      // Wait for the subscription callback
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      expect(callbackCount).toBeGreaterThan(0);
+      expect(receivedValue).not.toBeNull();
+      expect(typeof receivedValue).toBe('object');
+      expect((receivedValue as any).member1).toBe(testMember);
+      console.log(`✅ Parent struct subscription: received struct with member1=${(receivedValue as any)?.member1} ✓`);
+
+      await machine.unsubscribe(subscription);
+    }, 20000);
   });
 
   describe('Array Element Operations', () => {
