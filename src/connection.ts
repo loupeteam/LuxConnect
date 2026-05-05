@@ -210,8 +210,20 @@ export class OpcuaConnection {
       }
 
       this.sessionInfo.username = username || 'anonymous';
+      // Update roles from PATCH response when the server includes them.
+      // mapp Connect typically returns `roles: string[]` on a successful
+      // user change. Leave existing roles untouched if the server omits the
+      // field so older servers don't accidentally drop role state. For an
+      // explicit logout (no username) clear roles to match the new identity.
+      if (Array.isArray(data?.roles)) {
+        this.sessionInfo.roles = data.roles as string[];
+      } else if (!username) {
+        this.sessionInfo.roles = [];
+      }
       this.persistSession();
-      this.log.info(`Successfully changed user to: ${this.sessionInfo.username}`);
+      this.log.info(`Successfully changed user to: ${this.sessionInfo.username}`, {
+        roles: this.sessionInfo.roles,
+      });
       this.fireUserChanged(this.sessionInfo.username);
       // Re-emit current state so subscribers can refresh subscriptions if desired.
       this.setState(this.state);

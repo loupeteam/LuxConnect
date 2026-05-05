@@ -819,17 +819,18 @@ export class SubscriptionManager {
       throw new Error(`Monitored item for ${nodeId} not found in subscription`);
     }
 
-    // Remove from server
+    // Always remove from local maps first so that a server-side error cannot
+    // cause the item to be retried on every subsequent consolidation pass.
+    subscription.monitoredItems.delete(monitoredItemId);
+    this.clientHandleMap.delete(clientHandle);
+
+    // Remove from server (best-effort — local state is already cleaned up).
     await this.connection.apiRequest(
       `/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}/monitoredItems/${monitoredItemId}`, 
       {
         method: 'DELETE'
       }
     );
-
-    // Remove from local maps
-    subscription.monitoredItems.delete(monitoredItemId);
-    this.clientHandleMap.delete(clientHandle);
   }
 
   /**
@@ -917,11 +918,12 @@ export class SubscriptionManager {
         }
       }
 
-      // Clean up local state for items the server actually removed (or for which
-      // we have no per-item response, to preserve previous behavior).
-      const failedIds = new Set(failures.map(f => f.monitoredItemId));
+      // Always clean up local state after a deletion attempt, regardless of
+      // server response. Keeping failed items in local state causes the next
+      // consolidation pass to re-add them to `toRemove` and retry forever.
+      // If the server couldn't find the item (404) it's already gone; for
+      // other errors the item is untrackable so we remove it locally and log.
       for (const item of itemsToRemove) {
-        if (failedIds.has(item.monitoredItemId)) continue;
         subscription.monitoredItems.delete(item.monitoredItemId);
         this.clientHandleMap.delete(item.clientHandle);
       }

@@ -197,6 +197,15 @@ export class OpcuaMachine {
   }
 
   /**
+   * Get the roles assigned to the currently authenticated user, or undefined
+   * if no session is established. Returns an empty array for sessions where
+   * the server returned no roles (e.g. anonymous).
+   */
+  public getCurrentUserRoles(): string[] | undefined {
+    return this.connection.getSessionInfo()?.roles;
+  }
+
+  /**
    * Register a handler that fires whenever the authenticated user changes (including on connect).
    * Returns an unsubscribe function.
    */

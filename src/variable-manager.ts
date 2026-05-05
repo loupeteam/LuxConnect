@@ -519,10 +519,7 @@ export class VariableManager {
     const normalizedBaseName = this.normalizeVariableName(baseVariableName);
     const arrayElementName = `${baseVariableName}[${index}]`;
 
-    try {
-      // First attempt: Try direct write to array element (if server supports it)
-      console.log(`🎯 Attempting direct write to array element: ${arrayElementName}`);
-      
+    try {      
       try {
         await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value, arrayElementName);
         console.log(`✅ Direct write successful: ${arrayElementName} = ${JSON.stringify(value)}`);
