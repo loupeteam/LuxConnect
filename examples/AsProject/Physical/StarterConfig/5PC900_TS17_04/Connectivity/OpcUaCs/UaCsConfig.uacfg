@@ -10,7 +10,7 @@
       <Property ID="TcpPort" Value="4840" />
     </Group>
     <Group ID="Facets">
-      <Property ID="AuditingServerFacet" Value="0" />
+      <Property ID="AuditingServerFacet" Value="1" />
     </Group>
     <Group ID="Security">
       <Group ID="MessageSecurity">
@@ -36,6 +36,7 @@
         <Group ID="UserIdentityTokens">
           <Property ID="AnonymousIdentityToken" Value="1" />
           <Property ID="UserNameIdentityToken" Value="1" />
+          <Property ID="X509IdentityToken" Value="0" />
         </Group>
       </Group>
       <Group ID="Authorization">
