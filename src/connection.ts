@@ -210,15 +210,20 @@ export class OpcuaConnection {
       }
 
       this.sessionInfo.username = username || 'anonymous';
-      // Update roles from PATCH response when the server includes them.
-      // mapp Connect typically returns `roles: string[]` on a successful
-      // user change. Leave existing roles untouched if the server omits the
-      // field so older servers don't accidentally drop role state. For an
-      // explicit logout (no username) clear roles to match the new identity.
+      // Determine roles for the new identity. Prefer roles from the PATCH
+      // response when present; otherwise re-query `/auth` so we never carry
+      // stale roles from the previous user. Fall back to `[]` if `/auth`
+      // doesn't return role info (e.g. anonymous access on some servers).
       if (Array.isArray(data?.roles)) {
         this.sessionInfo.roles = data.roles as string[];
-      } else if (!username) {
-        this.sessionInfo.roles = [];
+      } else {
+        try {
+          const authData = await this.authenticate(username, password);
+          this.sessionInfo.roles = authData?.roles ?? [];
+        } catch (e) {
+          this.log.warn('Failed to refresh roles after changeUser; clearing roles:', e);
+          this.sessionInfo.roles = [];
+        }
       }
       this.persistSession();
       this.log.info(`Successfully changed user to: ${this.sessionInfo.username}`, {
@@ -448,7 +453,7 @@ export class OpcuaConnection {
    * without `userIdentityToken` (server-side anonymous mode).
    */
   private async createSession(): Promise<void> {
-    const authData = await this.authenticate();
+    const authData = await this.authenticate(this.config.username, this.config.password);
     const sessionRequest: SessionRequest = {
       url: this.config.endpointUrl || `opc.tcp://127.0.0.1:4840`,
       timeout: this.config.sessionTimeout || DEFAULT_SESSION_TIMEOUT_MS,
@@ -517,7 +522,10 @@ export class OpcuaConnection {
    * for anonymous access (when no username is configured and `/auth` is
    * skipped). Throws on auth failure.
    */
-  private async authenticate(): Promise<{ username?: string; roles?: string[] } | null> {
+  private async authenticate(
+    username?: string,
+    password?: string,
+  ): Promise<{ username?: string; roles?: string[] } | null> {
     const authUrl = `${this.baseUrl}/auth`;
     this.log.info(`mapp Connect authentication: ${authUrl}`);
 
@@ -526,8 +534,8 @@ export class OpcuaConnection {
       credentials: 'include',
       mode: 'cors',
     };
-    if (this.config.username) {
-      const credentials = btoa(`${this.config.username}:${this.config.password || ''}`);
+    if (username) {
+      const credentials = btoa(`${username}:${password || ''}`);
       options.headers = { 'Authorization': `Basic ${credentials}` };
     }
 
@@ -538,7 +546,7 @@ export class OpcuaConnection {
         // For anonymous (no username) access, a non-OK /auth is not necessarily
         // fatal — some servers only accept direct session creation. Keep going
         // and let the session POST decide.
-        if (!this.config.username) {
+        if (!username) {
           this.log.debug(`/auth returned ${response.status} for anonymous access; continuing`);
           return null;
         }
@@ -548,7 +556,7 @@ export class OpcuaConnection {
       this.log.debug('mapp Connect authentication successful', data);
       return data;
     } catch (error) {
-      if (!this.config.username) {
+      if (!username) {
         this.log.debug('/auth threw for anonymous access; continuing without auth data');
         return null;
       }
