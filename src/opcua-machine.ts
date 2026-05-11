@@ -2,10 +2,11 @@ import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
 import { SubscriptionManager } from './subscription-manager.js';
 import { VariablePathParser } from './variable-hierarchy.js';
-import { 
-  ConnectionConfig, 
-  ConnectionState, 
-  ConnectionStateHandler, 
+import { type Logger } from './logger.js';
+import {
+  ConnectionConfig,
+  ConnectionState,
+  ConnectionStateHandler,
   ErrorHandler,
   ErrorPolicy,
   OpcuaValue,
@@ -56,6 +57,11 @@ export class OpcuaMachine {
   private readGroups = new Map<string, ReadGroupInfo>();
   private subscriptionUpdateTimers = new Map<string, NodeJS.Timeout>();
   private subscriptionHandles?: Map<string, SubscriptionHandleInfo>;
+
+  /** Pluggable logger sourced from the underlying connection. */
+  private get log(): Logger {
+    return this.connection.getLogger();
+  }
 
   // Index signature for dynamic property access (lux.js style)
   [key: string]: OpcuaValue;
@@ -139,7 +145,7 @@ export class OpcuaMachine {
         // Note: only works for top-level variables — scoped paths (tasks, programs)
         // need machine.writeVariable('Program:Task.Var', x) instead.
         if (typeof value !== 'function') {
-          target.writeVariable(prop.toString(), value).catch(console.error);
+          target.writeVariable(prop.toString(), value).catch(err => target.log.error('writeVariable failed via proxy set:', err));
         }
         // Always return true — returning false throws TypeError in strict mode.
         return true;
@@ -242,6 +248,15 @@ export class OpcuaMachine {
   }
 
   /**
+   * Returns the logger configured for this machine's underlying connection.
+   * Useful for utilities (e.g. the LUX compatibility layer) that want to route
+   * their diagnostics through the same logger as the rest of the library.
+   */
+  public getLogger(): Logger {
+    return this.connection.getLogger();
+  }
+
+  /**
    * Manually trigger subscription recovery
    * Useful for testing or when connection issues are detected
    */
@@ -250,9 +265,9 @@ export class OpcuaMachine {
       throw new Error('Cannot recover subscriptions - not connected');
     }
     
-    console.log('Manually triggering subscription recovery...');
+    this.log.info('Manually triggering subscription recovery...');
     await this.subscriptionManager.recoverAllSubscriptions();
-    console.log('Manual subscription recovery completed');
+    this.log.info('Manual subscription recovery completed');
   }
 
   // Variable management (lux.js style)
@@ -664,7 +679,7 @@ export class OpcuaMachine {
       set: (_obj, prop: string | symbol, value: OpcuaValue) => {
         if (typeof prop === 'string' && typeof value !== 'function') {
           // machine[task].myVar = x  →  writes  appModule::scope:myVar
-          target.writeVariable(`${appModule}::${scope}:${prop}`, value).catch(console.error);
+          target.writeVariable(`${appModule}::${scope}:${prop}`, value).catch(err => target.log.error('writeVariable failed via scope proxy set:', err));
         }
         // Always return true — returning false throws TypeError in strict mode.
         return true;
@@ -770,7 +785,7 @@ export class OpcuaMachine {
 
       if (existingSubscription) {
         // Update existing subscription by setting desired variables and consolidating
-        console.log(`Updating existing subscription '${readGroupName}' from ${existingSubscription.desiredVariables.size} to ${variablesToAdd.length} variables`);
+        this.log.info(`Updating existing subscription '${readGroupName}' from ${existingSubscription.desiredVariables.size} to ${variablesToAdd.length} variables`);
         
         // Clear current desired variables and set new ones
         existingSubscription.desiredVariables.clear();
@@ -782,10 +797,10 @@ export class OpcuaMachine {
         await this.subscriptionManager.consolidateSubscription(existingSubscription);
         
         group.subscriptionId = existingSubscription.subscriptionId;
-        console.log(`✅ Subscription '${readGroupName}' updated with ${variablesToAdd.length} variables`);
+        this.log.info(`Subscription '${readGroupName}' updated with ${variablesToAdd.length} variables`);
       } else {
         // Create new subscription
-        console.log(`Creating new subscription '${readGroupName}' with ${variablesToAdd.length} variables`);
+        this.log.info(`Creating new subscription '${readGroupName}' with ${variablesToAdd.length} variables`);
         
         // Create empty subscription first
         await this.subscriptionManager.createSubscription(readGroupName, subscriptionOptions);
@@ -795,14 +810,14 @@ export class OpcuaMachine {
         
         const subscriptionInfo = this.subscriptionManager.getSubscription(readGroupName);
         group.subscriptionId = subscriptionInfo?.subscriptionId || null;
-        console.log(`✅ Subscription '${readGroupName}' created with ${variablesToAdd.length} variables`);
+        this.log.info(`Subscription '${readGroupName}' created with ${variablesToAdd.length} variables`);
       }
     } catch (error) {
       // If the subscription was stale on the server (e.g. from a previous session that
       // disconnected mid-flight), delete it locally and retry once from scratch.
       const msg = (error as Error).message ?? '';
       if (msg.includes('not found on server')) {
-        console.warn(`Subscription '${readGroupName}' was stale — deleting and retrying...`);
+        this.log.warn(`Subscription '${readGroupName}' was stale — deleting and retrying...`);
         try {
           await this.subscriptionManager.deleteSubscription(readGroupName);
         } catch {
@@ -811,10 +826,10 @@ export class OpcuaMachine {
         try {
           await this.doCreateOrUpdateSubscription(readGroupName);
         } catch (retryError) {
-          console.error(`Retry also failed for subscription '${readGroupName}':`, retryError);
+          this.log.error(`Retry also failed for subscription '${readGroupName}':`, retryError);
         }
       } else {
-        console.error(`Failed to create/update subscription '${readGroupName}':`, error);
+        this.log.error(`Failed to create/update subscription '${readGroupName}':`, error);
       }
     }
   }
@@ -828,7 +843,7 @@ export class OpcuaMachine {
     try {
       await this.subscriptionManager.deleteSubscription(readGroupName);
     } catch (error) {
-      console.warn(`Failed to delete subscription for read group '${readGroupName}':`, error);
+      this.log.warn(`Failed to delete subscription for read group '${readGroupName}':`, error);
     }
 
     group.subscriptionId = null;
@@ -851,7 +866,7 @@ export class OpcuaMachine {
     this.connection.onConnectionStateChanged(async (state) => {
       if (state !== 'connected') {
         if (state === 'reconnecting') {
-          console.log('Connection lost — will rebuild subscriptions on reconnect');
+          this.log.info('Connection lost — will rebuild subscriptions on reconnect');
         }
         return;
       }
@@ -864,7 +879,7 @@ export class OpcuaMachine {
         // New session: any local subscription ids reference the dead session.
         // Wipe local state; the rebuild loop below will recreate everything.
         if (this.subscriptionManager.getAllSubscriptions().size > 0) {
-          console.log('New session detected — clearing stale subscription state');
+          this.log.info('New session detected — clearing stale subscription state');
         }
         this.subscriptionManager.clearAllSubscriptions();
         for (const group of this.readGroups.values()) {
@@ -882,15 +897,15 @@ export class OpcuaMachine {
       if (activeGroups.length === 0) return;
 
       const action = sessionChanged ? 'building' : 'reconciling';
-      console.log(`Connected — ${action} ${activeGroups.length} subscription(s)...`);
+      this.log.info(`Connected — ${action} ${activeGroups.length} subscription(s)...`);
       for (const [name] of activeGroups) {
         try {
           await this.doCreateOrUpdateSubscription(name);
         } catch (error) {
-          console.error(`Failed to (re)build subscription '${name}':`, error);
+          this.log.error(`Failed to (re)build subscription '${name}':`, error);
         }
       }
-      console.log('✅ Subscriptions ready');
+      this.log.info('Subscriptions ready');
     });
   }
 }
