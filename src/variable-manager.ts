@@ -7,9 +7,11 @@ import {
   OpcuaValue,
   OpcuaObject
 } from './types.js';
-import { 
-  VariableHierarchy, 
-  VariablePathParser
+import {
+  VariableHierarchy,
+  VariablePathParser,
+  DEFAULT_GLOBAL_TASK,
+  DEFAULT_NAMESPACE
 } from './variable-hierarchy.js';
 import { LuxConnectErrorCode, rejectWithError } from './errors.js';
 
@@ -27,9 +29,9 @@ export class VariableManager {
   private errorPolicy: ErrorPolicy = 'default';
   
   // NodeId generation settings
-  private defaultNamespace: string = 'ns=5;s=';
+  private defaultNamespace: string = DEFAULT_NAMESPACE;
   private defaultApplication: string = ''; // Empty means use parser default
-  private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
+  private defaultTask: string = DEFAULT_GLOBAL_TASK;
   private taskNameMaxLength: number | undefined = undefined; // Optional truncation limit for task/scope names
 
   constructor(connection: OpcuaConnection) {
@@ -43,16 +45,10 @@ export class VariableManager {
     this.defaultNamespace = namespace.endsWith(';s=') ? namespace : namespace + ';s=';
   }
 
-  /**
-   * Set default application/module for variables without explicit application
-   */
   public setDefaultApplication(application: string): void {
     this.defaultApplication = application;
   }
 
-  /**
-   * Set default task for variables without explicit task
-   */
   public setDefaultTask(task: string): void {
     this.defaultTask = task;
   }
@@ -70,6 +66,23 @@ export class VariableManager {
    */
   public getTaskNameMaxLength(): number | undefined {
     return this.taskNameMaxLength;
+  }
+
+  /**
+   * Re-compute and update the OPC UA nodeId for every registered variable using
+   * the current namespace/application/task defaults.  Call this after changing
+   * the default namespace (e.g. after the server-side namespace index is resolved)
+   * so that pre-registered variables use the correct nodeId.
+   */
+  public rebuildNodeIds(): void {
+    const allVars = this.hierarchy.getAllVariables();
+    for (const [name, varData] of allVars) {
+      const newNodeId = this.buildNodeId(name);
+      if (newNodeId !== varData.mapping.nodeId) {
+        console.debug(`Updating nodeId for '${name}': ${varData.mapping.nodeId} → ${newNodeId}`);
+        this.hierarchy.updateNodeId(name, newNodeId);
+      }
+    }
   }
 
   /**
@@ -452,7 +465,7 @@ export class VariableManager {
     const quality = this.mapQualityCode(result.status?.code || 0);
 
     // If variable is registered, update hierarchy and emit change events
-    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality, targetNodeId);
     if (varData) {
       // Emit change events for all affected variables
       for (const affectedName of affectedVariables) {
@@ -496,7 +509,7 @@ export class VariableManager {
     // Check if value is a complex object that needs decomposition
     // This will handle both regular complex objects AND complex values in array elements
     if (this.isComplexValue(value)) {
-      await this.writeComplexValue(value, name);
+        await this.writeComplexValue(value, name);
       return;
     }
 
@@ -884,7 +897,7 @@ export class VariableManager {
       // hierarchy keys and nodeId strings always agree on the task name.
       if (
         this.taskNameMaxLength !== undefined &&
-        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task !== DEFAULT_GLOBAL_TASK &&
         parsedPath.task.length > this.taskNameMaxLength
       ) {
         parsedPath.task = parsedPath.task.slice(0, this.taskNameMaxLength);
@@ -1003,10 +1016,10 @@ export class VariableManager {
   /**
    * Build NodeId from variable name
    */
-  private buildNodeId(varName: string): string {
-    // Pass instance-specific defaults to the centralized method
+  public buildNodeId(varName: string, overrides?: { namespace?: string; nodeId?: string }): string {
     return VariablePathParser.buildNodeId(varName, {
-      namespace: this.defaultNamespace,
+      namespace: overrides?.namespace || this.defaultNamespace,
+      ...(overrides?.nodeId !== undefined && { nodeId: overrides.nodeId }),
       defaultApplication: this.defaultApplication,
       defaultTask: this.defaultTask,
       ...(this.taskNameMaxLength !== undefined && { taskNameMaxLength: this.taskNameMaxLength })

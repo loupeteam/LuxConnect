@@ -1,6 +1,6 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
-import { VariablePathParser } from './variable-hierarchy.js';
+import { VariablePathParser, DEFAULT_GLOBAL_TASK } from './variable-hierarchy.js';
 import { LuxConnectError, LuxConnectErrorCode } from './errors.js';
 import type { Logger } from './logger.js';
 import { silentLogger } from './logger.js';
@@ -425,7 +425,7 @@ export class SubscriptionManager {
       if (
         taskNameMaxLength !== undefined &&
         parsedPath.task &&
-        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task !== DEFAULT_GLOBAL_TASK &&
         parsedPath.task.length > taskNameMaxLength
       ) {
         parsedPath.task = parsedPath.task.slice(0, taskNameMaxLength);
@@ -441,7 +441,7 @@ export class SubscriptionManager {
       }
 
       // Add task if not the default AsGlobalPV
-      if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
+      if (parsedPath.task && parsedPath.task !== DEFAULT_GLOBAL_TASK) {
         hierarchyParts.push(parsedPath.task);
       }
       

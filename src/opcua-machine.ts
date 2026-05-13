@@ -1,7 +1,7 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
 import { SubscriptionManager } from './subscription-manager.js';
-import { VariablePathParser } from './variable-hierarchy.js';
+import { DEFAULT_GLOBAL_TASK } from './variable-hierarchy.js';
 import { 
   ConnectionConfig, 
   ConnectionState, 
@@ -50,9 +50,6 @@ export class OpcuaMachine {
   private connection: OpcuaConnection;
   private variableManager: VariableManager;
   private subscriptionManager: SubscriptionManager;
-  private defaultNamespace: string = 'ns=5;s=';
-  private defaultApplication: string = ''; // Empty means use parser default
-  private defaultTask: string = 'AsGlobalPV'; // Default task for variables without explicit task
   private readGroups = new Map<string, ReadGroupInfo>();
   private subscriptionUpdateTimers = new Map<string, NodeJS.Timeout>();
   private subscriptionHandles?: Map<string, SubscriptionHandleInfo>;
@@ -64,11 +61,7 @@ export class OpcuaMachine {
     this.connection = new OpcuaConnection(config);
     this.variableManager = new VariableManager(this.connection);
     this.subscriptionManager = new SubscriptionManager(this.connection, this.variableManager);
-    
-    // Initialize VariableManager with current defaults
-    this.variableManager.setDefaultNamespace(this.defaultNamespace);
-    this.variableManager.setDefaultApplication(this.defaultApplication);
-    this.variableManager.setDefaultTask(this.defaultTask);
+
     if (config.taskNameMaxLength !== undefined) {
       this.variableManager.setTaskNameMaxLength(config.taskNameMaxLength);
     }
@@ -360,31 +353,16 @@ export class OpcuaMachine {
     return this.getFromGlobalState(varName);
   }
 
-  /**
-   * Set default namespace for variables
-   */
-  public setDefaultNamespace(namespace: string): void {
-    this.defaultNamespace = namespace.endsWith(';s=') ? namespace : namespace + ';s=';
-    // Automatically update VariableManager
-    this.variableManager.setDefaultNamespace(this.defaultNamespace);
+  private setDefaultNamespace(namespace: string): void {
+    this.variableManager.setDefaultNamespace(namespace);
   }
 
-  /**
-   * Set default application/module for variables without explicit application
-   */
   public setDefaultApplication(application: string): void {
-    this.defaultApplication = application;
-    // Automatically update VariableManager
-    this.variableManager.setDefaultApplication(this.defaultApplication);
+    this.variableManager.setDefaultApplication(application);
   }
 
-  /**
-   * Set default task for variables without explicit task
-   */
   public setDefaultTask(task: string): void {
-    this.defaultTask = task;
-    // Automatically update VariableManager
-    this.variableManager.setDefaultTask(this.defaultTask);
+    this.variableManager.setDefaultTask(task);
   }
 
   /**
@@ -516,7 +494,7 @@ export class OpcuaMachine {
       
       // First check all app modules for AsGlobalPV scope
       for (const appModule of Object.keys(globalState)) {
-        const asGlobalPV = globalState[appModule]?.AsGlobalPV?.[varName];
+        const asGlobalPV = globalState[appModule]?.[DEFAULT_GLOBAL_TASK]?.[varName];
         if (asGlobalPV !== undefined) {
           return asGlobalPV;
         }
@@ -525,7 +503,7 @@ export class OpcuaMachine {
       // If not found in global scope, check all tasks in all app modules
       for (const appModule of Object.keys(globalState)) {
         for (const scope of Object.keys(globalState[appModule] || {})) {
-          if (scope !== 'AsGlobalPV') { // Already checked global
+          if (scope !== DEFAULT_GLOBAL_TASK) { // Already checked global
             const taskVar = globalState[appModule][scope]?.[varName];
             if (taskVar !== undefined) {
               return taskVar;
@@ -594,7 +572,7 @@ export class OpcuaMachine {
   /**
    * Get all variables in a specific scope
    */
-  public getVariablesInScope(appModule: string = '_default', scope: string = 'AsGlobalPV'): string[] {
+  public getVariablesInScope(appModule: string = '_default', scope: string = DEFAULT_GLOBAL_TASK): string[] {
     const globalState = this.variableManager.getGlobalState();
     const scopeData = globalState[appModule]?.[scope];
     return scopeData ? Object.keys(scopeData) : [];
@@ -693,31 +671,10 @@ export class OpcuaMachine {
   // Private implementation methods
 
   private buildNodeId(varName: string, options: VariableOptions): string {
-    // Pass instance-specific defaults and per-call options to the centralized method
-    const buildOptions: {
-      namespace?: string;
-      nodeId?: string;
-      defaultApplication?: string;
-      defaultTask?: string;
-      taskNameMaxLength?: number;
-    } = {
-      namespace: options.namespace || this.defaultNamespace,
-      defaultApplication: this.defaultApplication,
-      defaultTask: this.defaultTask
-    };
-
-    if (options.nodeId) {
-      buildOptions.nodeId = options.nodeId;
-    }
-
-    // Honor the task/scope name length limit configured on the VariableManager
-    // so nodeIds built directly here match those built via the manager.
-    const taskNameMaxLength = this.variableManager.getTaskNameMaxLength();
-    if (taskNameMaxLength !== undefined) {
-      buildOptions.taskNameMaxLength = taskNameMaxLength;
-    }
-
-    return VariablePathParser.buildNodeId(varName, buildOptions);
+    return this.variableManager.buildNodeId(varName, {
+      ...(options.namespace !== undefined && { namespace: options.namespace }),
+      ...(options.nodeId !== undefined && { nodeId: options.nodeId }),
+    });
   }
 
   private ensureReadGroup(name: string): void {
@@ -854,6 +811,13 @@ export class OpcuaMachine {
           console.log('Connection lost — will rebuild subscriptions on reconnect');
         }
         return;
+      }
+
+      // Apply server-resolved PLC namespace index so all nodeIds use the correct ns= value.
+      const nsIndex = this.connection.getPlcNamespaceIndex();
+      if (nsIndex !== null) {
+        this.setDefaultNamespace(`ns=${nsIndex};s=`);
+        this.variableManager.rebuildNodeIds();
       }
 
       const currentSessionId = this.connection.getSessionInfo()?.sessionId ?? null;

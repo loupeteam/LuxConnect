@@ -175,7 +175,7 @@ describe('VariableHierarchy (Cross-Platform)', () => {
     });
 
     it('should create and return variable for non-existent variable update', () => {
-      const affected = hierarchy.updateVariable('NonExistent', 123, mockDate, 'good');
+      const affected = hierarchy.updateVariable('NonExistent', 123, mockDate, 'good', 'ns=1;s=NonExistent');
       expect(affected).toEqual(['NonExistent']);
       
       // Verify the variable was actually created
@@ -483,7 +483,7 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       hierarchy.addVariable('ConvertArray[1]', 'ns=1;s=ConvertArray[1]', 'item1', mockDate, 'good');
       
       // Then add a regular array value (simulating server data)
-      hierarchy.updateVariable('ConvertArray', ['new_item0', 'new_item1', 'new_item2'], mockDate, 'good');
+      hierarchy.updateVariable('ConvertArray', ['new_item0', 'new_item1', 'new_item2'], mockDate, 'good', 'ns=1;s=ConvertArray');
       
       const globalState = hierarchy.getGlobalState();
       expect(Array.isArray(globalState._default.AsGlobalPV.ConvertArray)).toBe(true);

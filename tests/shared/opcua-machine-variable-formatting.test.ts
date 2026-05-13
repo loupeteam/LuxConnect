@@ -75,7 +75,7 @@ describe('OpcuaMachine Variable Name Formatting', () => {
     beforeEach(() => {
       machine.setDefaultApplication('MyApp');
       machine.setDefaultTask('MainTask');
-      machine.setDefaultNamespace('ns=6;s=');
+      machine['setDefaultNamespace']('ns=6;s=');
     });
 
     it('should apply default application to simple variables', () => {
@@ -108,13 +108,13 @@ describe('OpcuaMachine Variable Name Formatting', () => {
 
   describe('configuration methods', () => {
     it('should configure default namespace', () => {
-      machine.setDefaultNamespace('ns=10;s=');
+      machine['setDefaultNamespace']('ns=10;s=');
       const result = (machine as any).buildNodeId('Test', {});
       expect(result).toBe('ns=10;s=::AsGlobalPV:Test');
     });
 
     it('should auto-append ;s= to namespace if missing', () => {
-      machine.setDefaultNamespace('ns=10');
+      machine['setDefaultNamespace']('ns=10');
       const result = (machine as any).buildNodeId('Test', {});
       expect(result).toBe('ns=10;s=::AsGlobalPV:Test');
     });
