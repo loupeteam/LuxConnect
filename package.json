@@ -1,6 +1,6 @@
 {
   "name": "@loupeteam/lux-connect",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Modern TypeScript OPC UA client library with subscription-based value mirroring",
   "type": "module",
   "main": "dist/index.js",
