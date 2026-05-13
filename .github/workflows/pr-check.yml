@@ -14,6 +14,9 @@ jobs:
   check:
     name: Lint, Build, Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -24,12 +27,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          registry-url: https://npm.pkg.github.com/
+          scope: '@loupeteam'
 
       - name: Install dependencies
         # `npm ci` runs the `prepare` script which builds the project, so a
         # separate build step is not strictly required, but we run it explicitly
         # below for clarity and to surface build failures distinctly.
+        # NODE_AUTH_TOKEN authenticates against GitHub Packages for @loupeteam scope.
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Lint
         run: npm run lint

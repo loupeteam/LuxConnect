@@ -35,7 +35,11 @@ jobs:
           fi
 
       - name: Install dependencies
+        # NODE_AUTH_TOKEN authenticates against GitHub Packages for @loupeteam scope
+        # (needed because @loupeteam/loupe-ux is hosted there).
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: npm run build
