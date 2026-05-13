@@ -4,8 +4,8 @@
   <Element ID="SSLConfiguration" Type="SSLCFG">
     <Selector ID="SSLCfgType" Value="CommonSslCfg">
       <Group ID="OwnCertificate">
-        <Property ID="OwnCertificate" Value="MyCert.cer" />
-        <Property ID="OwnCertificatePrivateKey" Value="MyKey.key" />
+        <Property ID="OwnCertificate" Value="Example.cer" />
+        <Property ID="OwnCertificatePrivateKey" Value="Example.key" />
       </Group>
       <Selector ID="SSLCipherSuite" Value="TLS_1_2">
         <Property ID="ADH-AES128-SHA" Value="off" />
