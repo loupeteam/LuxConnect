@@ -69,20 +69,12 @@ export class VariableManager {
   }
 
   /**
-   * Re-compute and update the OPC UA nodeId for every registered variable using
-   * the current namespace/application/task defaults.  Call this after changing
-   * the default namespace (e.g. after the server-side namespace index is resolved)
-   * so that pre-registered variables use the correct nodeId.
+   * Get the effective nodeId for a registered variable.
+   * Returns the explicit nodeId override if one was stored, otherwise generates from name + current namespace.
    */
-  public rebuildNodeIds(): void {
-    const allVars = this.hierarchy.getAllVariables();
-    for (const [name, varData] of allVars) {
-      const newNodeId = this.buildNodeId(name);
-      if (newNodeId !== varData.mapping.nodeId) {
-        console.debug(`Updating nodeId for '${name}': ${varData.mapping.nodeId} → ${newNodeId}`);
-        this.hierarchy.updateNodeId(name, newNodeId);
-      }
-    }
+  private getNodeIdForVar(normalizedName: string): string {
+    const varData = this.hierarchy.getVariable(normalizedName);
+    return varData?.mapping.explicitNodeId ?? this.buildNodeId(normalizedName);
   }
 
   /**
@@ -130,12 +122,12 @@ export class VariableManager {
 
   
   /**
-   * Register a variable with format validation and optional array parameter detection
+   * Register a variable with format validation and optional array parameter detection.
    * @param name Variable name
-   * @param nodeId Node ID
+   * @param nodeId Optional explicit nodeId override. If omitted, nodeId is generated on-the-fly from the name and current namespace.
    * @param readArrayParams Whether to read and store array parameters (ValueRank, ArrayDimensions)
    */
-  public registerVariable(name: string, nodeId: string, readArrayParams: boolean = false): OpcuaVariable | Promise<OpcuaVariable> {
+  public registerVariable(name: string, nodeId?: string, readArrayParams: boolean = false): OpcuaVariable | Promise<OpcuaVariable> {
     if (readArrayParams) {
       return this.registerVariableAsync(name, nodeId, true);
     } else {
@@ -144,30 +136,23 @@ export class VariableManager {
   }
 
   /**
-   * Synchronous variable registration (original implementation)
+   * Synchronous variable registration
    */
-  private registerVariableSync(name: string, nodeId: string): OpcuaVariable {
-    // Validate variable name format
+  private registerVariableSync(name: string, explicitNodeId?: string): OpcuaVariable {
     try {
       VariablePathParser.parse(name);
     } catch (error) {
       throw new Error(`Invalid variable name format '${name}': ${error}`);
     }
 
-    // Normalize the variable name for consistent storage
     const normalizedName = this.normalizeVariableName(name);
 
-    // Check if already registered
+    // If already registered, return existing variable (idempotent)
     const existingVar = this.hierarchy.getVariable(normalizedName);
-    if (existingVar && existingVar.mapping.nodeId !== nodeId) {
-      throw new Error(`Variable '${name}' is already registered with different nodeId '${existingVar.mapping.nodeId}'`);
-    }
-    
-    // If variable exists with same nodeId, return existing variable
     if (existingVar) {
       return {
         name: existingVar.mapping.name,
-        nodeId: existingVar.mapping.nodeId,
+        nodeId: this.getNodeIdForVar(normalizedName),
         value: existingVar.value,
         timestamp: existingVar.timestamp,
         quality: existingVar.quality,
@@ -175,62 +160,42 @@ export class VariableManager {
       };
     }
 
-    // Use default values - real values will come from subscription updates
-    const variableInfo = {
-      value: undefined,
-      timestamp: new Date(),
-      quality: 'unknown' as const,
-      dataType: undefined
-    };
-    
-    // Add to hierarchy using normalized name
     this.hierarchy.addVariable(
       normalizedName,
-      nodeId,
-      variableInfo.value,
-      variableInfo.timestamp,
-      variableInfo.quality,
-      variableInfo.dataType
+      explicitNodeId,
+      undefined,
+      new Date(),
+      'unknown',
+      undefined
     );
 
-    // Convert to OpcuaVariable format
-    const namedVariable: OpcuaVariable = {
+    return {
       name: normalizedName,
-      nodeId,
-      value: variableInfo.value,
-      timestamp: variableInfo.timestamp,
-      quality: variableInfo.quality,
-      ...(variableInfo.dataType ? { dataType: variableInfo.dataType } : {})
+      nodeId: explicitNodeId ?? this.buildNodeId(normalizedName),
+      value: undefined,
+      timestamp: new Date(),
+      quality: 'unknown'
     };
-
-    return namedVariable;
   }
 
   /**
    * Asynchronous variable registration with array parameter reading
    */
-  private async registerVariableAsync(name: string, nodeId: string, readArrayParams: boolean): Promise<OpcuaVariable> {
-    // Validate variable name format
+  private async registerVariableAsync(name: string, explicitNodeId: string | undefined, readArrayParams: boolean): Promise<OpcuaVariable> {
     try {
       VariablePathParser.parse(name);
     } catch (error) {
       throw new Error(`Invalid variable name format '${name}': ${error}`);
     }
 
-    // Normalize the variable name for consistent storage
     const normalizedName = this.normalizeVariableName(name);
 
-    // Check if already registered
+    // If already registered, return existing variable (idempotent)
     const existingVar = this.hierarchy.getVariable(normalizedName);
-    if (existingVar && existingVar.mapping.nodeId !== nodeId) {
-      throw new Error(`Variable '${name}' is already registered with different nodeId '${existingVar.mapping.nodeId}'`);
-    }
-    
-    // If variable exists with same nodeId, return existing variable
     if (existingVar) {
       return {
         name: existingVar.mapping.name,
-        nodeId: existingVar.mapping.nodeId,
+        nodeId: this.getNodeIdForVar(normalizedName),
         value: existingVar.value,
         timestamp: existingVar.timestamp,
         quality: existingVar.quality,
@@ -238,59 +203,41 @@ export class VariableManager {
       };
     }
 
-    // Use default values - real values will come from subscription updates
-    const variableInfo = {
-      value: undefined,
-      timestamp: new Date(),
-      quality: 'unknown' as const,
-      dataType: undefined,
-      valueRank: undefined as number | undefined,
-      arrayDimensions: undefined as Array<[number, number]> | undefined
-    };
+    let valueRank: number | undefined;
+    let arrayDimensions: Array<[number, number]> | undefined;
 
-    // Optionally read array parameters
     if (readArrayParams) {
       try {
         const arrayParams = await this.readArrayParameters(name);
-        variableInfo.valueRank = arrayParams.valueRank;
-        
-        // Convert simple array dimensions to OPC UA format with start/end ranges
+        valueRank = arrayParams.valueRank;
         if (arrayParams.arrayDimensions) {
-          variableInfo.arrayDimensions = arrayParams.arrayDimensions.map(size => [0, size - 1] as [number, number]);
+          arrayDimensions = arrayParams.arrayDimensions.map(size => [0, size - 1] as [number, number]);
         }
       } catch (error) {
         console.warn(`Could not read array parameters for '${name}': ${error}`);
       }
     }
-    
-    // Add to hierarchy using normalized name
+
     this.hierarchy.addVariable(
       normalizedName,
-      nodeId,
-      variableInfo.value,
-      variableInfo.timestamp,
-      variableInfo.quality,
-      variableInfo.dataType,
-      variableInfo.valueRank,
-      variableInfo.arrayDimensions
+      explicitNodeId,
+      undefined,
+      new Date(),
+      'unknown',
+      undefined,
+      valueRank,
+      arrayDimensions
     );
 
-    // Convert to OpcuaVariable format
-    const namedVariable: OpcuaVariable = {
+    return {
       name: normalizedName,
-      nodeId,
-      value: variableInfo.value,
-      timestamp: variableInfo.timestamp,
-      quality: variableInfo.quality,
-      ...(variableInfo.dataType ? { dataType: variableInfo.dataType } : {})
+      nodeId: explicitNodeId ?? this.buildNodeId(normalizedName),
+      value: undefined,
+      timestamp: new Date(),
+      quality: 'unknown'
     };
-
-    return namedVariable;
   }
 
-  /**
-   * Get a registered variable by name
-   */
   public getVariable(name: string): OpcuaVariable | undefined {
     const normalizedName = this.normalizeVariableName(name);
     const varData = this.hierarchy.getVariable(normalizedName);
@@ -298,7 +245,7 @@ export class VariableManager {
 
     return {
       name: varData.mapping.name,
-      nodeId: varData.mapping.nodeId,
+      nodeId: this.getNodeIdForVar(normalizedName),
       value: varData.value,
       timestamp: varData.timestamp,
       quality: varData.quality,
@@ -306,23 +253,18 @@ export class VariableManager {
     };
   }
 
-  /**
-   * Get all registered variables
-   */
   public getAllVariables(): Map<string, OpcuaVariable> {
     const result = new Map<string, OpcuaVariable>();
-    
     for (const [name, varData] of this.hierarchy.getAllVariables()) {
       result.set(name, {
         name: varData.mapping.name,
-        nodeId: varData.mapping.nodeId,
+        nodeId: this.getNodeIdForVar(name),
         value: varData.value,
         timestamp: varData.timestamp,
         quality: varData.quality,
         ...(varData.mapping.dataType && { dataType: varData.mapping.dataType })
       });
     }
-    
     return result;
   }
 
@@ -370,15 +312,7 @@ export class VariableManager {
     dimensionCount: number;
   }> {
     const normalizedName = this.normalizeVariableName(name);
-    
-    // Get or build nodeId
-    let targetNodeId: string;
-    const varData = this.hierarchy.getVariable(normalizedName);
-    if (varData) {
-      targetNodeId = varData.mapping.nodeId;
-    } else {
-      targetNodeId = this.buildNodeId(name);
-    }
+    const targetNodeId = this.getNodeIdForVar(normalizedName);
 
     try {
       // Read ValueRank (-1 = scalar, 0 = 1D array, 1 = 2D array, etc.)
@@ -422,23 +356,17 @@ export class VariableManager {
    */
   private async performReadValue(name: string): Promise<OpcuaValue> {
     const normalizedName = this.normalizeVariableName(name);
-    
-    // Try to get nodeId from registered variable first
+
     let targetNodeId: string;
-    const varData = this.hierarchy.getVariable(normalizedName);
-    if (varData) {
-      targetNodeId = varData.mapping.nodeId;
-    } else {
-      try {
-        targetNodeId = this.buildNodeId(name);
-      } catch (error) {
-        return rejectWithError(
-          LuxConnectErrorCode.INVALID_VARIABLE_NAME,
-          `Invalid variable name '${name}': ${error}`,
-          { variableName: name },
-          error instanceof Error ? error : new Error(String(error))
-        );
-      }
+    try {
+      targetNodeId = this.getNodeIdForVar(normalizedName);
+    } catch (error) {
+      return rejectWithError(
+        LuxConnectErrorCode.INVALID_VARIABLE_NAME,
+        `Invalid variable name '${name}': ${error}`,
+        { variableName: name },
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
 
     const response = await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/nodes/${encodeURIComponent(targetNodeId)}/attributes/Value`, {
@@ -446,16 +374,16 @@ export class VariableManager {
     });
 
     const result = await response.json();
-    
+
     if (result.status?.code !== 0) {
       return rejectWithError(
         LuxConnectErrorCode.READ_FAILED,
         `Failed to read variable '${name}': ${result.status?.code?.description || 'Unknown error'}`,
-        { 
-          variableName: name, 
-          nodeId: targetNodeId, 
+        {
+          variableName: name,
+          nodeId: targetNodeId,
           statusCode: result.status?.code,
-          statusDescription: result.status?.code?.description 
+          statusDescription: result.status?.code?.description
         }
       );
     }
@@ -464,10 +392,15 @@ export class VariableManager {
     const timestamp = new Date(result.serverTimestamp || Date.now());
     const quality = this.mapQualityCode(result.status?.code || 0);
 
+    // Auto-register unread variables so the value is stored in the hierarchy
+    if (!this.hierarchy.getVariable(normalizedName)) {
+      this.hierarchy.addVariable(normalizedName, undefined, undefined, timestamp, quality);
+    }
+
     // If variable is registered, update hierarchy and emit change events
-    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality, targetNodeId);
+    const varData = this.hierarchy.getVariable(normalizedName);
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, newValue, timestamp, quality);
     if (varData) {
-      // Emit change events for all affected variables
       for (const affectedName of affectedVariables) {
         const affectedData = this.hierarchy.getVariable(affectedName);
         if (affectedData) {
@@ -599,36 +532,32 @@ export class VariableManager {
    */
   private async writeComplexValue(value: OpcuaValue, originalName: string): Promise<void> {
     const flattenedValues = this.flattenValue('', value);
-    
+
     if (flattenedValues.length === 0) {
       throw new Error(`No writable values found in complex object for variable '${originalName}'`);
     }
 
-    // Prepare batch write requests
     const batchWrites: Array<{
       nodeId: string;
+      varName: string;
       value: OpcuaValue;
       path: string;
     }> = [];
 
     for (const { path, value: simpleValue } of flattenedValues) {
       const fullVariableName = originalName + path;
-      
       try {
-        const subNodeId = this.buildNodeId(fullVariableName);
-        
         batchWrites.push({
-          nodeId: subNodeId,
+          nodeId: this.buildNodeId(fullVariableName),
+          varName: fullVariableName,
           value: simpleValue,
-          path: path
+          path
         });
       } catch (error) {
         console.warn(`Could not build nodeId for sub-variable '${fullVariableName}': ${error}. Skipping.`);
-        continue;
       }
     }
 
-    // Execute batch write
     await this.executeBatchWrite(batchWrites, originalName);
   }
 
@@ -669,7 +598,7 @@ export class VariableManager {
   /**
    * Execute batch write operations
    */
-  private async executeBatchWrite(writes: Array<{ nodeId: string; value: OpcuaValue; path: string }>, originalName: string): Promise<void> {
+  private async executeBatchWrite(writes: Array<{ nodeId: string; varName: string; value: OpcuaValue; path: string }>, originalName: string): Promise<void> {
     const sessionId = this.connection.getSessionInfo()?.sessionId;
     if (!sessionId) {
       throw new Error('No active session');
@@ -730,16 +659,11 @@ export class VariableManager {
       // Update hierarchy for all successful writes
       const timestamp = new Date();
       const quality = 'Good';
-      
+
       for (const write of writes) {
-        const fullVariableName = Object.keys(this.hierarchy.getAllVariables()).find(name => 
-          this.hierarchy.getVariable(name)?.mapping.nodeId === write.nodeId
-        );
-        
-        if (fullVariableName) {
-          const affectedVariables = this.hierarchy.updateVariable(fullVariableName, write.value, timestamp, quality);
-          
-          // Emit change events for all affected variables
+        const normalizedName = this.normalizeVariableName(write.varName);
+        if (this.hierarchy.getVariable(normalizedName)) {
+          const affectedVariables = this.hierarchy.updateVariable(normalizedName, write.value, timestamp, quality);
           for (const affectedName of affectedVariables) {
             const affectedData = this.hierarchy.getVariable(affectedName);
             if (affectedData) {
@@ -769,26 +693,16 @@ export class VariableManager {
    * Write a single simple value
    * No registration required - builds NodeId dynamically
    */
-  private async writeSingleValue(normalizedName: string, value: OpcuaValue, originalName: string): Promise<void> {
-    // Try to get nodeId from registered variable first
-    let targetNodeId: string;
-    const varData = this.hierarchy.getVariable(normalizedName);
-    if (varData) {
-      targetNodeId = varData.mapping.nodeId;
-    } else {
-      // Generate NodeId dynamically
-      targetNodeId = this.buildNodeId(originalName);
-    }
-
+  private async writeSingleValue(normalizedName: string, value: OpcuaValue, _originalName: string): Promise<void> {
+    const targetNodeId = this.getNodeIdForVar(normalizedName);
     await this.writeSingleValueByNodeId(targetNodeId, value);
 
     // If variable is registered, update hierarchy and emit change events
+    const varData = this.hierarchy.getVariable(normalizedName);
     if (varData) {
       const timestamp = new Date();
-      const quality = this.mapQualityCode(0); // Assume success
+      const quality = this.mapQualityCode(0);
       const affectedVariables = this.hierarchy.updateVariable(normalizedName, value, timestamp, quality);
-      
-      // Emit change events for all affected variables
       for (const affectedName of affectedVariables) {
         const affectedData = this.hierarchy.getVariable(affectedName);
         if (affectedData) {
@@ -913,14 +827,12 @@ export class VariableManager {
    * Update a variable from external source (e.g., subscription notification)
    * This automatically handles hierarchical updates through the global state
    */
-  public updateVariableFromNotification(nodeId: string, value: OpcuaValue, timestamp: Date, quality: string): void {
-    const varData = this.hierarchy.getVariableByNodeId(nodeId);
+  public updateVariableFromNotification(varName: string, value: OpcuaValue, timestamp: Date, quality: string): void {
+    const normalizedName = this.normalizeVariableName(varName);
+    const varData = this.hierarchy.getVariable(normalizedName);
     if (!varData) return;
 
-    // Update in hierarchy (this automatically updates related variables via global state)
-    const affectedVariables = this.hierarchy.updateVariable(varData.mapping.name, value, timestamp, quality);
-    
-    // Emit change events for all affected variables
+    const affectedVariables = this.hierarchy.updateVariable(normalizedName, value, timestamp, quality);
     for (const affectedName of affectedVariables) {
       const affectedData = this.hierarchy.getVariable(affectedName);
       if (affectedData) {
@@ -935,16 +847,16 @@ export class VariableManager {
   public getRelatedVariables(name: string): Array<{ type: 'parent' | 'child' | 'sibling'; variable: OpcuaVariable }> {
     const normalizedName = this.normalizeVariableName(name);
     const related = this.hierarchy.findRelatedVariables(normalizedName);
-    
+
     return related.map(rel => {
       const varData = this.hierarchy.getVariable(rel.variable);
       if (!varData) throw new Error(`Related variable ${rel.variable} not found`);
-      
+
       return {
         type: rel.type,
         variable: {
           name: varData.mapping.name,
-          nodeId: varData.mapping.nodeId,
+          nodeId: this.getNodeIdForVar(rel.variable),
           value: varData.value,
           timestamp: varData.timestamp,
           quality: varData.quality,
@@ -965,13 +877,10 @@ export class VariableManager {
    * Emit change event for a variable
    */
   private emitChangeEvent(name: string, value: OpcuaValue, timestamp: Date, quality: string): void {
-    const varData = this.hierarchy.getVariable(name);
-    if (!varData) return;
-
     const normalizedName = this.normalizeVariableName(name);
 
     const changeEvent: VariableChangeEvent = {
-      nodeId: varData.mapping.nodeId,
+      nodeId: this.getNodeIdForVar(normalizedName),
       name,
       value,
       timestamp,

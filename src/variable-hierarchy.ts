@@ -17,7 +17,7 @@ export interface VariablePath {
 
 export interface VariableMapping {
   name: string;
-  nodeId: string;
+  explicitNodeId?: string; // Only set when the user provides an explicit nodeId override
   dataType?: string;
   valueRank?: number; // -1 = scalar, 0 = 1D array, 1 = 2D array, etc.
   arrayDimensions?: Array<[number, number]>; // For each dimension: [start, end] e.g., [[1, 4], [0, 2]]
@@ -323,7 +323,6 @@ export class VariablePathParser {
 export class VariableHierarchy {
   private globalState: OpcuaObject = {};
   private variables = new Map<string, VariableMapping>();
-  private nodeIdToName = new Map<string, string>();
   private stateMetadata = new Map<string, { timestamp: Date; quality: string }>();
   private arrayDimensionsCache = new Map<string, Array<[number, number]>>();
 
@@ -331,21 +330,21 @@ export class VariableHierarchy {
    * Add a variable to the hierarchy
    */
   addVariable(
-    name: string, 
-    nodeId: string, 
-    value: OpcuaValue, 
-    timestamp: Date, 
-    quality: string, 
+    name: string,
+    explicitNodeId: string | undefined | null,
+    value: OpcuaValue,
+    timestamp: Date,
+    quality: string,
     dataType?: string,
     valueRank?: number,
     arrayDimensions?: Array<[number, number]>
   ): VariableMapping {
     const parsedPath = VariablePathParser.parse(name);
     const statePath = VariablePathParser.toStatePath(parsedPath);
-    
+
     const mapping: VariableMapping = {
       name,
-      nodeId,
+      ...(explicitNodeId ? { explicitNodeId } : {}),
       parsedPath,
       statePath,
       ...(dataType && { dataType }),
@@ -353,7 +352,6 @@ export class VariableHierarchy {
       ...(arrayDimensions && { arrayDimensions })
     };
 
-    // Store the mapping
     // Cache array dimensions if provided
     if (arrayDimensions) {
       const baseArrayName = this.extractBaseArrayName(name);
@@ -363,30 +361,25 @@ export class VariableHierarchy {
     }
 
     this.variables.set(name, mapping);
-    this.nodeIdToName.set(nodeId, name);
-    
+
     // Update global state directly
     this.setValueAtPath(this.globalState, statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
-    
+
     return mapping;
   }
 
   /**
    * Update a variable value with automatic propagation
    */
-  updateVariable(name: string, value: OpcuaValue, timestamp: Date, quality: string, nodeId?: string): string[] {
-    let mapping = this.variables.get(name);
-    if (!mapping) {
-      if (!nodeId) return [];
-      mapping = this.addVariable(name, nodeId, value, timestamp, quality);
-      return [name]; // Return just this variable as affected
-    }
+  updateVariable(name: string, value: OpcuaValue, timestamp: Date, quality: string): string[] {
+    const mapping = this.variables.get(name);
+    if (!mapping) return [];
 
     // Update global state directly
     this.setValueAtPath(this.globalState, mapping.statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
-    
+
     // Find all variables that might be affected by this change
     return this.findAffectedVariables(mapping);
   }
@@ -400,16 +393,8 @@ export class VariableHierarchy {
 
     const value = this.getValueAtPath(this.globalState, mapping.statePath);
     const metadata = this.stateMetadata.get(name) || { timestamp: new Date(), quality: 'unknown' };
-    
-    return { mapping, value, ...metadata };
-  }
 
-  /**
-   * Get variable by nodeId
-   */
-  getVariableByNodeId(nodeId: string): { mapping: VariableMapping; value: OpcuaValue; timestamp: Date; quality: string } | undefined {
-    const name = this.nodeIdToName.get(nodeId);
-    return name ? this.getVariable(name) : undefined;
+    return { mapping, value, ...metadata };
   }
 
   /**
@@ -429,32 +414,12 @@ export class VariableHierarchy {
   }
 
   /**
-   * Update the nodeId for an already-registered variable.
-   * Updates the reverse nodeId→name lookup accordingly.
-   */
-  updateNodeId(name: string, nodeId: string): void {
-    const mapping = this.variables.get(name);
-    if (!mapping) return;
-    this.nodeIdToName.delete(mapping.nodeId);
-    mapping.nodeId = nodeId;
-    this.nodeIdToName.set(nodeId, name);
-  }
-
-  /**
    * Remove variable from hierarchy
    */
   removeVariable(name: string): boolean {
-    const mapping = this.variables.get(name);
-    if (!mapping) return false;
-
-    // Remove from mappings
+    if (!this.variables.has(name)) return false;
     this.variables.delete(name);
-    this.nodeIdToName.delete(mapping.nodeId);
     this.stateMetadata.delete(name);
-    
-    // Note: We don't remove from global state to avoid affecting other variables
-    // that might share the same state path
-    
     return true;
   }
 

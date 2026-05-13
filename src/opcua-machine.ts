@@ -262,13 +262,9 @@ export class OpcuaMachine {
     // Ensure read group exists
     this.ensureReadGroup(readGroup);
     
-    // Build nodeId
-    const nodeId = this.buildNodeId(varName, options);
-    
-    // Register variable immediately - no need to wait for connection
-    // This will validate the variable name and add it to the hierarchy with default values
+    // Register variable immediately — pass explicit nodeId override only if set
     if (!this.variableManager.getVariable(varName)) {
-      this.variableManager.registerVariable(varName, nodeId);
+      this.variableManager.registerVariable(varName, options.nodeId);
     }
     
     // Check if this is a new variable for the read group
@@ -670,13 +666,6 @@ export class OpcuaMachine {
   
   // Private implementation methods
 
-  private buildNodeId(varName: string, options: VariableOptions): string {
-    return this.variableManager.buildNodeId(varName, {
-      ...(options.namespace !== undefined && { namespace: options.namespace }),
-      ...(options.nodeId !== undefined && { nodeId: options.nodeId }),
-    });
-  }
-
   private ensureReadGroup(name: string): void {
     if (!this.readGroups.has(name)) {
       this.readGroups.set(name, {
@@ -817,7 +806,6 @@ export class OpcuaMachine {
       const nsIndex = this.connection.getPlcNamespaceIndex();
       if (nsIndex !== null) {
         this.setDefaultNamespace(`ns=${nsIndex};s=`);
-        this.variableManager.rebuildNodeIds();
       }
 
       const currentSessionId = this.connection.getSessionInfo()?.sessionId ?? null;

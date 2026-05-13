@@ -1051,10 +1051,9 @@ export class SubscriptionManager {
       }
     }
 
-    // Update variable manager if this is a registered variable
     if (monitoredItem.variableName) {
       this.variableManager.updateVariableFromNotification(
-        monitoredItem.nodeId,
+        monitoredItem.variableName,
         dataNotification.value,
         timestamp,
         quality
