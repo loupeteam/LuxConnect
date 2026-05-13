@@ -505,6 +505,10 @@ export class SubscriptionManager {
     return new Map(this.subscriptions);
   }
 
+  public getClientHandleMap(): ReadonlyMap<number, { monitoredItemId: number; clientHandle: number; nodeId: string; variableName?: string }> {
+    return this.clientHandleMap;
+  }
+
   /**
    * Recover all subscriptions after reconnection
    * This recreates all subscriptions and monitored items with the new session

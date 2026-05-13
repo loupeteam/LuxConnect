@@ -590,6 +590,40 @@ export class OpcuaMachine {
   }
 
   /**
+   * Returns a map of clientHandle → { monitoredItemId, clientHandle, nodeId, variableName }
+   * for correlating subscription notification clientHandles to variable names.
+   */
+  public getClientHandles() {
+    return this.subscriptionManager.getClientHandleMap();
+  }
+
+  public reportVariables() {
+    const vars = this.getAllVariables();
+    return Array.from(vars.entries())
+      .map(([key, { value, timestamp, quality }]) => ({ key, value, timestamp, quality }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  public reportBadVariables() {
+    const vars = this.getAllVariables();
+    return Array.from(vars.entries())
+      .map(([key, { value, timestamp, quality }]) => ({ key, value, timestamp, quality }))
+      .filter(({ quality }) => quality !== 'good')
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  public reportClientHandles() {
+    return Array.from(this.getClientHandles().entries())
+      .map(([clientHandle, info]) => ({
+        clientHandle,
+        variableName: info.variableName ?? '(unregistered)',
+        nodeId: info.nodeId,
+        monitoredItemId: info.monitoredItemId
+      }))
+      .sort((a, b) => a.clientHandle - b.clientHandle);
+  }
+
+  /**
    * Create a proxy for accessing scopes within an app module
    * Handles: machine.AppModule.ScopeName
    */
