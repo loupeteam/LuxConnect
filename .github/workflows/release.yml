@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           registry-url: https://npm.pkg.github.com/
           scope: '@loupeteam'
@@ -35,9 +35,13 @@ jobs:
           fi
 
       - name: Install dependencies
-        # NODE_AUTH_TOKEN authenticates against GitHub Packages for @loupeteam scope
-        # (needed because @loupeteam/loupe-ux is hosted there).
-        run: npm ci
+        # Use `npm install` (not `npm ci`) to work around npm/cli#4828: lockfiles
+        # generated on Windows don't include the linux-specific rollup native
+        # binary. NODE_AUTH_TOKEN authenticates against GitHub Packages for the
+        # @loupeteam scope (needed because @loupeteam/loupe-ux is hosted there).
+        run: |
+          rm -f package-lock.json
+          npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

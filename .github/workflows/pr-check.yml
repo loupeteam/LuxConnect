@@ -25,17 +25,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           registry-url: https://npm.pkg.github.com/
           scope: '@loupeteam'
 
       - name: Install dependencies
-        # `npm ci` runs the `prepare` script which builds the project, so a
-        # separate build step is not strictly required, but we run it explicitly
-        # below for clarity and to surface build failures distinctly.
+        # Use `npm install` (not `npm ci`) to work around npm/cli#4828: lockfiles
+        # generated on Windows don't include the linux-specific rollup native
+        # binary, causing `npm ci` to leave it missing. `npm install` resolves
+        # platform-specific optional deps fresh.
         # NODE_AUTH_TOKEN authenticates against GitHub Packages for @loupeteam scope.
-        run: npm ci
+        run: |
+          rm -f package-lock.json
+          npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
