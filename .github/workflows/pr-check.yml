@@ -1,0 +1,46 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, Build, Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` runs the `prepare` script which builds the project, so a
+        # separate build step is not strictly required, but we run it explicitly
+        # below for clarity and to surface build failures distinctly.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        # CI=true causes vitest.config.ts to exclude integration tests that need
+        # a live OPC UA server on localhost:8443.
+        run: npx vitest run
