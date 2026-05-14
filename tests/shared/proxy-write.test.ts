@@ -51,8 +51,8 @@ describe('proxy write', () => {
 
     it('does not write known own properties', () => {
       // Setting a real writable property on the machine should not call writeVariable.
-      // We use a known internal field (defaultTask is a regular writable string property).
-      (machine as any).defaultTask = 'SomeTask';
+      // We use a known internal field (readGroups is a regular writable Map property).
+      (machine as any).readGroups = new Map();
       expect(writeSpy).not.toHaveBeenCalled();
     });
   });

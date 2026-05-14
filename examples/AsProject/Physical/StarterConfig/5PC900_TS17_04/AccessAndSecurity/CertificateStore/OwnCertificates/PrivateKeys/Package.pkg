@@ -2,6 +2,6 @@
 <?AutomationStudio FileVersion="4.9"?>
 <Package SubType="PrivateKeys" PackageType="PrivateKeys" xmlns="http://br-automation.co.at/AS/Package">
   <Objects>
-    <Object Type="File">MyKey.key</Object>
+    <Object Type="File">Example.key</Object>
   </Objects>
 </Package>

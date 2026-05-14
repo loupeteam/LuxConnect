@@ -1,6 +1,6 @@
 import { OpcuaConnection } from './connection.js';
 import { VariableManager } from './variable-manager.js';
-import { VariablePathParser } from './variable-hierarchy.js';
+import { VariablePathParser, DEFAULT_GLOBAL_TASK } from './variable-hierarchy.js';
 import { LuxConnectError, LuxConnectErrorCode } from './errors.js';
 import type { Logger } from './logger.js';
 import { silentLogger } from './logger.js';
@@ -425,7 +425,7 @@ export class SubscriptionManager {
       if (
         taskNameMaxLength !== undefined &&
         parsedPath.task &&
-        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task !== DEFAULT_GLOBAL_TASK &&
         parsedPath.task.length > taskNameMaxLength
       ) {
         parsedPath.task = parsedPath.task.slice(0, taskNameMaxLength);
@@ -441,7 +441,7 @@ export class SubscriptionManager {
       }
 
       // Add task if not the default AsGlobalPV
-      if (parsedPath.task && parsedPath.task !== 'AsGlobalPV') {
+      if (parsedPath.task && parsedPath.task !== DEFAULT_GLOBAL_TASK) {
         hierarchyParts.push(parsedPath.task);
       }
       
@@ -503,6 +503,10 @@ export class SubscriptionManager {
    */
   public getAllSubscriptions(): Map<string, SubscriptionInfo> {
     return new Map(this.subscriptions);
+  }
+
+  public getClientHandleMap(): ReadonlyMap<number, { monitoredItemId: number; clientHandle: number; nodeId: string; variableName?: string }> {
+    return this.clientHandleMap;
   }
 
   /**
@@ -1051,10 +1055,9 @@ export class SubscriptionManager {
       }
     }
 
-    // Update variable manager if this is a registered variable
     if (monitoredItem.variableName) {
       this.variableManager.updateVariableFromNotification(
-        monitoredItem.nodeId,
+        monitoredItem.variableName,
         dataNotification.value,
         timestamp,
         quality

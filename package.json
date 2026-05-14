@@ -1,6 +1,6 @@
 {
-  "name": "lux-opcua",
-  "version": "1.0.0",
+  "name": "@loupeteam/lux-connect",
+  "version": "0.0.1",
   "description": "Modern TypeScript OPC UA client library with subscription-based value mirroring",
   "type": "module",
   "main": "dist/index.js",
@@ -14,6 +14,13 @@
   "files": [
     "dist"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/loupeteam/LuxConnect.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  },
   "scripts": {
     "prebuild": "node scripts/generate-build-info.js",
     "build": "tsc",
@@ -45,7 +52,7 @@
   "license": "MIT",
   "devDependencies": {
     "@loupeteam/loupe-ux": "^2.0.4",
-    "@types/node": "^20.19.13",
+    "@types/node": "^24.0.0",
     "@types/ws": "^8.5.0",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.2",
@@ -64,6 +71,6 @@
     "ws": "^8.18.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0"
   }
 }

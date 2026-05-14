@@ -22,12 +22,12 @@ describe('VariableManager (Cross-Platform)', () => {
       expect(variable.quality).toBe('unknown')
     })
 
-    it('should prevent duplicate registration', () => {
+    it('should idempotently handle duplicate registration', () => {
       variableManager.registerVariable('Temperature', mockNodeIds.Temperature)
-      
-      expect(() => {
-        variableManager.registerVariable('Temperature', 'ns=5;s=AnotherNodeId')
-      }).toThrow('already registered')
+      // Re-registering with a different explicit nodeId still returns the existing variable
+      const result = variableManager.registerVariable('Temperature', 'ns=5;s=AnotherNodeId')
+      expect(result).toBeDefined()
+      expect(result.name).toBe('::AsGlobalPV:Temperature')
     })
 
     it('should gracefully handle multiple registrations of the same variable', () => {

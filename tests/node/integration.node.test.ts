@@ -202,10 +202,7 @@ describe('Integration Tests - Real Server Communication', () => {
       // Attempt to connect to the server
       console.log('⏳ Attempting server connection...');
       await machine.connect();
-      
-      // Configure the machine like in demos
-      machine.setDefaultNamespace('ns=5;s=');
-      
+
       isServerAvailable = true;
       connectionEstablished = true;
       console.log('✅ Server connection successful - running integration tests');
@@ -1405,21 +1402,21 @@ describe('Integration Tests - Real Server Communication', () => {
       
       // Store original configuration to restore later
       const originalConfig = {
-        namespace: (machine as any).defaultNamespace || 'ns=5;s=',
+        namespace: (machine as any).variableManager?.defaultNamespace || 'ns=5;s=',
         application: (machine as any).defaultApplication,
         task: (machine as any).defaultTask
       };
-      
+
       try {
         // These should work even after connection is established
         expect(() => {
-          machine.setDefaultNamespace('ns=6;s=');
+          machine['setDefaultNamespace']('ns=6;s=');
           machine.setDefaultApplication('IntegrationTest');
           machine.setDefaultTask('ErrorTest');
         }).not.toThrow();
       } finally {
         // Restore original configuration
-        machine.setDefaultNamespace(originalConfig.namespace);
+        machine['setDefaultNamespace'](originalConfig.namespace);
         machine.setDefaultApplication(originalConfig.application);
         machine.setDefaultTask(originalConfig.task);
       }
@@ -1443,27 +1440,27 @@ describe('Integration Tests - Real Server Communication', () => {
       
       // Store original configuration to restore later
       const originalConfig = {
-        namespace: (machine as any).defaultNamespace || 'ns=5;s=',
+        namespace: (machine as any).variableManager?.defaultNamespace || 'ns=5;s=',
         application: (machine as any).defaultApplication,
         task: (machine as any).defaultTask
       };
-      
+
       try {
         // Configure defaults
-        machine.setDefaultNamespace('ns=5;s=');
+        machine['setDefaultNamespace']('ns=5;s=');
         machine.setDefaultApplication('ConfigTest');
         machine.setDefaultTask('Integration');
-        
+
         // Register a new variable that should use these defaults
         const testVar = 'ConfigTestVariable';
         machine.initCyclicRead(testVar);
-        
+
         // The variable should be registered with the configured defaults
         const variable = (machine as any).variableManager.getVariable(testVar);
         expect(variable).toBeDefined();
       } finally {
         // Restore original configuration
-        machine.setDefaultNamespace(originalConfig.namespace);
+        machine['setDefaultNamespace'](originalConfig.namespace);
         machine.setDefaultApplication(originalConfig.application);
         machine.setDefaultTask(originalConfig.task);
       }

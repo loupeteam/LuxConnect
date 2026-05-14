@@ -53,10 +53,9 @@ describe('Core Integration Tests - Working Features Only', () => {
 
   beforeAll(async () => {
     machine = new OpcuaMachine(TEST_CONFIG);
-    
+    machine.setErrorPolicy("strict");
     try {
       await machine.connect();
-      machine.setDefaultNamespace('ns=5;s=');
       isConnected = true;
       console.log('✅ Connected to server successfully');
       

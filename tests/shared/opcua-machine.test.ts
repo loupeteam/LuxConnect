@@ -111,28 +111,28 @@ describe('OpcuaMachine (Cross-Platform)', () => {
 
   describe('configuration methods', () => {
     it('should set default namespace', () => {
-      machine.setDefaultNamespace('ns=5')
-      
+      machine['setDefaultNamespace']('ns=5')
+
       // Check that the namespace is stored with correct format
-      expect(machine['defaultNamespace']).toBe('ns=5;s=')
+      expect(machine['variableManager']['defaultNamespace']).toBe('ns=5;s=')
     })
 
     it('should auto-append ;s= to namespace if missing', () => {
-      machine.setDefaultNamespace('ns=3;s=')
-      expect(machine['defaultNamespace']).toBe('ns=3;s=')
-      
-      machine.setDefaultNamespace('ns=7')
-      expect(machine['defaultNamespace']).toBe('ns=7;s=')
+      machine['setDefaultNamespace']('ns=3;s=')
+      expect(machine['variableManager']['defaultNamespace']).toBe('ns=3;s=')
+
+      machine['setDefaultNamespace']('ns=7')
+      expect(machine['variableManager']['defaultNamespace']).toBe('ns=7;s=')
     })
 
     it('should set default application', () => {
       machine.setDefaultApplication('MyApp')
-      expect(machine['defaultApplication']).toBe('MyApp')
+      expect(machine['variableManager']['defaultApplication']).toBe('MyApp')
     })
 
     it('should set default task', () => {
       machine.setDefaultTask('Production')
-      expect(machine['defaultTask']).toBe('Production')
+      expect(machine['variableManager']['defaultTask']).toBe('Production')
     })
 
     it('should configure variable manager when setting defaults', () => {
@@ -140,7 +140,7 @@ describe('OpcuaMachine (Cross-Platform)', () => {
       const vmSetApplicationSpy = vi.spyOn(machine['variableManager'], 'setDefaultApplication')  
       const vmSetTaskSpy = vi.spyOn(machine['variableManager'], 'setDefaultTask')
       
-      machine.setDefaultNamespace('ns=5;s=')
+      machine['setDefaultNamespace']('ns=5;s=')
       machine.setDefaultApplication('TestApp')
       machine.setDefaultTask('TestTask')
       

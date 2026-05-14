@@ -1,5 +1,8 @@
 import { OpcuaValue, OpcuaObject, OpcuaArray } from './types';
 
+export const DEFAULT_GLOBAL_TASK = 'AsGlobalPV';
+export const DEFAULT_NAMESPACE = 'ns=5;s=';
+
 /**
  * Simplified variable hierarchy using a single state object with deep copying
  * Much simpler approach that's easier to understand and maintain
@@ -14,7 +17,7 @@ export interface VariablePath {
 
 export interface VariableMapping {
   name: string;
-  nodeId: string;
+  explicitNodeId?: string; // Only set when the user provides an explicit nodeId override
   dataType?: string;
   valueRank?: number; // -1 = scalar, 0 = 1D array, 1 = 2D array, etc.
   arrayDimensions?: Array<[number, number]>; // For each dimension: [start, end] e.g., [[1, 4], [0, 2]]
@@ -26,41 +29,6 @@ export interface VariableMapping {
  * Parse mapp Connect variable names according to the schema
  */
 export class VariablePathParser {
-  // Global default configuration (can be overridden by higher-level components)
-  private static globalDefaults = {
-    namespace: 'ns=5;s=',
-    application: '', // Empty means use parser default
-    task: 'AsGlobalPV' // Default task for variables without explicit task
-  };
-
-  /**
-   * Configure global default namespace for nodeId generation
-   */
-  static setGlobalDefaultNamespace(namespace: string): void {
-    VariablePathParser.globalDefaults.namespace = namespace.endsWith(';s=') ? namespace : namespace + ';s=';
-  }
-
-  /**
-   * Configure global default application for nodeId generation
-   */
-  static setGlobalDefaultApplication(application: string): void {
-    VariablePathParser.globalDefaults.application = application;
-  }
-
-  /**
-   * Configure global default task for nodeId generation
-   */
-  static setGlobalDefaultTask(task: string): void {
-    VariablePathParser.globalDefaults.task = task;
-  }
-
-  /**
-   * Get current global defaults
-   */
-  static getGlobalDefaults(): { namespace: string; application: string; task: string } {
-    return { ...VariablePathParser.globalDefaults };
-  }
-  
   /**
    * Parse a variable name into components
    * Supports multiple formats:
@@ -130,7 +98,7 @@ export class VariablePathParser {
       
       return {
         application, // Will be empty string for ::GlobalVariable
-        task: 'AsGlobalPV', // Global variables use AsGlobalPV task
+        task: DEFAULT_GLOBAL_TASK, // Global variables use AsGlobalPV task
         variable: result.variable,
         path: result.path
       };
@@ -163,7 +131,7 @@ export class VariablePathParser {
     
     return {
       application: '', // Default application
-      task: 'AsGlobalPV', // Global scope
+      task: DEFAULT_GLOBAL_TASK, // Global scope
       variable: result.variable,
       path: result.path
     };
@@ -240,7 +208,7 @@ export class VariablePathParser {
     }
     
     // Add scope (task or AsGlobalPV) - always present
-    const scope = parsedPath.task || 'AsGlobalPV';
+    const scope = parsedPath.task || DEFAULT_GLOBAL_TASK;
     statePath.push(scope);
     
     // Add base variable
@@ -308,29 +276,29 @@ export class VariablePathParser {
     try {
       const parsedPath = VariablePathParser.parse(varName);
       
-      // Apply defaults (use provided options or fall back to global defaults)
-      const defaultApplication = options.defaultApplication ?? VariablePathParser.globalDefaults.application;
-      const defaultTask = options.defaultTask ?? VariablePathParser.globalDefaults.task;
-      
+      // Apply defaults (use provided options or fall back to hardcoded defaults)
+      const defaultApplication = options.defaultApplication ?? '';
+      const defaultTask = options.defaultTask ?? DEFAULT_GLOBAL_TASK;
+
       if (!parsedPath.application && defaultApplication) {
         parsedPath.application = defaultApplication;
       }
-      
-      if (!parsedPath.task || parsedPath.task === 'AsGlobalPV') {
-        if (defaultTask && defaultTask !== 'AsGlobalPV') {
+
+      if (!parsedPath.task || parsedPath.task === DEFAULT_GLOBAL_TASK) {
+        if (defaultTask && defaultTask !== DEFAULT_GLOBAL_TASK) {
           parsedPath.task = defaultTask;
         }
       }
-      
-      // Ensure task defaults to AsGlobalPV if still empty
+
+      // Ensure task defaults to DEFAULT_GLOBAL_TASK if still empty
       if (!parsedPath.task) {
-        parsedPath.task = 'AsGlobalPV';
+        parsedPath.task = DEFAULT_GLOBAL_TASK;
       }
 
       // Truncate task name for local variables when a limit is configured
       if (
         options.taskNameMaxLength !== undefined &&
-        parsedPath.task !== 'AsGlobalPV' &&
+        parsedPath.task !== DEFAULT_GLOBAL_TASK &&
         parsedPath.task.length > options.taskNameMaxLength
       ) {
         parsedPath.task = parsedPath.task.slice(0, options.taskNameMaxLength);
@@ -343,8 +311,8 @@ export class VariablePathParser {
       normalizedVarName = varName;
     }
     
-    // Use provided namespace or fall back to global default
-    const namespace = options.namespace ?? VariablePathParser.globalDefaults.namespace;
+    // Use provided namespace or fall back to hardcoded default
+    const namespace = options.namespace ?? DEFAULT_NAMESPACE;
     return namespace + normalizedVarName;
   }
 }
@@ -355,29 +323,28 @@ export class VariablePathParser {
 export class VariableHierarchy {
   private globalState: OpcuaObject = {};
   private variables = new Map<string, VariableMapping>();
-  private nodeIdToName = new Map<string, string>();
   private stateMetadata = new Map<string, { timestamp: Date; quality: string }>();
-  private arrayDimensionsCache = new Map<string, Array<[number, number]>>(); // Cache for array dimensions by base variable name
+  private arrayDimensionsCache = new Map<string, Array<[number, number]>>();
 
   /**
    * Add a variable to the hierarchy
    */
   addVariable(
-    name: string, 
-    nodeId: string, 
-    value: OpcuaValue, 
-    timestamp: Date, 
-    quality: string, 
+    name: string,
+    explicitNodeId: string | undefined | null,
+    value: OpcuaValue,
+    timestamp: Date,
+    quality: string,
     dataType?: string,
     valueRank?: number,
     arrayDimensions?: Array<[number, number]>
   ): VariableMapping {
     const parsedPath = VariablePathParser.parse(name);
     const statePath = VariablePathParser.toStatePath(parsedPath);
-    
+
     const mapping: VariableMapping = {
       name,
-      nodeId,
+      ...(explicitNodeId ? { explicitNodeId } : {}),
       parsedPath,
       statePath,
       ...(dataType && { dataType }),
@@ -385,7 +352,6 @@ export class VariableHierarchy {
       ...(arrayDimensions && { arrayDimensions })
     };
 
-    // Store the mapping
     // Cache array dimensions if provided
     if (arrayDimensions) {
       const baseArrayName = this.extractBaseArrayName(name);
@@ -395,12 +361,11 @@ export class VariableHierarchy {
     }
 
     this.variables.set(name, mapping);
-    this.nodeIdToName.set(nodeId, name);
-    
+
     // Update global state directly
     this.setValueAtPath(this.globalState, statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
-    
+
     return mapping;
   }
 
@@ -408,18 +373,13 @@ export class VariableHierarchy {
    * Update a variable value with automatic propagation
    */
   updateVariable(name: string, value: OpcuaValue, timestamp: Date, quality: string): string[] {
-    let mapping = this.variables.get(name);
-    if (!mapping) {
-      // If no mapping exists, create one with proper nodeId (uses global defaults from VariablePathParser)
-      const nodeId = VariablePathParser.buildNodeId(name);
-      mapping = this.addVariable(name, nodeId, value, timestamp, quality);
-      return [name]; // Return just this variable as affected
-    }
+    const mapping = this.variables.get(name);
+    if (!mapping) return [];
 
     // Update global state directly
     this.setValueAtPath(this.globalState, mapping.statePath, value);
     this.stateMetadata.set(name, { timestamp, quality });
-    
+
     // Find all variables that might be affected by this change
     return this.findAffectedVariables(mapping);
   }
@@ -433,16 +393,8 @@ export class VariableHierarchy {
 
     const value = this.getValueAtPath(this.globalState, mapping.statePath);
     const metadata = this.stateMetadata.get(name) || { timestamp: new Date(), quality: 'unknown' };
-    
-    return { mapping, value, ...metadata };
-  }
 
-  /**
-   * Get variable by nodeId
-   */
-  getVariableByNodeId(nodeId: string): { mapping: VariableMapping; value: OpcuaValue; timestamp: Date; quality: string } | undefined {
-    const name = this.nodeIdToName.get(nodeId);
-    return name ? this.getVariable(name) : undefined;
+    return { mapping, value, ...metadata };
   }
 
   /**
@@ -465,17 +417,9 @@ export class VariableHierarchy {
    * Remove variable from hierarchy
    */
   removeVariable(name: string): boolean {
-    const mapping = this.variables.get(name);
-    if (!mapping) return false;
-
-    // Remove from mappings
+    if (!this.variables.has(name)) return false;
     this.variables.delete(name);
-    this.nodeIdToName.delete(mapping.nodeId);
     this.stateMetadata.delete(name);
-    
-    // Note: We don't remove from global state to avoid affecting other variables
-    // that might share the same state path
-    
     return true;
   }
 
