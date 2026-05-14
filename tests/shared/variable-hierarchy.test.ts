@@ -21,7 +21,7 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       );
 
       expect(mapping.name).toBe('Temperature');
-      expect(mapping.nodeId).toBe('ns=1;s=Temperature');
+      expect(mapping.explicitNodeId).toBe('ns=1;s=Temperature');
       expect(mapping.parsedPath).toEqual({
         application: '',
         task: 'AsGlobalPV',
@@ -144,22 +144,6 @@ describe('VariableHierarchy (Cross-Platform)', () => {
     });
   });
 
-  describe('variable lookup by nodeId', () => {
-    it('should retrieve variable by nodeId', () => {
-      hierarchy.addVariable('TestVar', 'ns=1;s=TestVar', 'value', mockDate, 'good');
-      
-      const result = hierarchy.getVariableByNodeId('ns=1;s=TestVar');
-      expect(result).toBeDefined();
-      expect(result!.mapping.name).toBe('TestVar');
-      expect(result!.value).toBe('value');
-    });
-
-    it('should return undefined for non-existent nodeId', () => {
-      const result = hierarchy.getVariableByNodeId('ns=1;s=NonExistent');
-      expect(result).toBeUndefined();
-    });
-  });
-
   describe('variable updates and propagation', () => {
     it('should update variable value correctly', () => {
       hierarchy.addVariable('Temperature', 'ns=1;s=Temperature', 25.5, mockDate, 'good');
@@ -174,14 +158,13 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       expect(retrieved!.timestamp).toBe(newDate);
     });
 
-    it('should create and return variable for non-existent variable update', () => {
+    it('should return empty array for non-existent variable update', () => {
       const affected = hierarchy.updateVariable('NonExistent', 123, mockDate, 'good');
-      expect(affected).toEqual(['NonExistent']);
-      
-      // Verify the variable was actually created
+      expect(affected).toEqual([]);
+
+      // Variable should not be auto-created
       const variable = hierarchy.getVariable('NonExistent');
-      expect(variable).toBeDefined();
-      expect(variable?.value).toBe(123);
+      expect(variable).toBeUndefined();
     });
 
     it('should detect affected variables when updating parent structures', () => {
@@ -219,9 +202,6 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       
       const retrieved = hierarchy.getVariable('TempVar');
       expect(retrieved).toBeUndefined();
-      
-      const byNodeId = hierarchy.getVariableByNodeId('ns=1;s=TempVar');
-      expect(byNodeId).toBeUndefined();
     });
 
     it('should return false when removing non-existent variable', () => {
@@ -477,14 +457,15 @@ describe('VariableHierarchy (Cross-Platform)', () => {
       expect(globalState._default.AsGlobalPV.SparseArray.length).toBe(6); // Array length should be 6
     });
 
-    it('should handle converting from string-keyed arrays to proper arrays', () => {
-      // Simulate the old behavior to test conversion
+    it('should handle updating a parent array after individual elements are registered', () => {
       hierarchy.addVariable('ConvertArray[0]', 'ns=1;s=ConvertArray[0]', 'item0', mockDate, 'good');
       hierarchy.addVariable('ConvertArray[1]', 'ns=1;s=ConvertArray[1]', 'item1', mockDate, 'good');
-      
-      // Then add a regular array value (simulating server data)
+      // Register the parent so it can be updated
+      hierarchy.addVariable('ConvertArray', 'ns=1;s=ConvertArray', ['item0', 'item1'], mockDate, 'good');
+
+      // Update parent with a new array (simulating server data)
       hierarchy.updateVariable('ConvertArray', ['new_item0', 'new_item1', 'new_item2'], mockDate, 'good');
-      
+
       const globalState = hierarchy.getGlobalState();
       expect(Array.isArray(globalState._default.AsGlobalPV.ConvertArray)).toBe(true);
       expect(globalState._default.AsGlobalPV.ConvertArray[0]).toBe('new_item0');

@@ -1162,7 +1162,7 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
 
       // Verify variable manager was updated
       expect(mockVariableManager.updateVariableFromNotification).toHaveBeenCalledWith(
-        nodeId,
+        variableName,
         42.5,
         expect.any(Date),
         'good'
@@ -1249,7 +1249,7 @@ describe('SubscriptionManager (Cross-Platform) - With Public Methods', () => {
         messageHandler(mockNotification);
 
         expect(mockVariableManager.updateVariableFromNotification).toHaveBeenCalledWith(
-          nodeId,
+          variableName,
           100,
           expect.any(Date),
           test.expected

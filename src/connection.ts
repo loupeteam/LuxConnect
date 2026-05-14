@@ -50,6 +50,7 @@ export class OpcuaConnection {
   private sessionInfo: SessionInfo | null = null;
   private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
   private readonly webSocketManager: WebSocketManager;
+  private plcNamespaceIndex: number | null = null;
   /** Cookie jar for Node.js (browsers handle cookies automatically). */
   private readonly cookies = new Map<string, string>();
 
@@ -100,6 +101,11 @@ export class OpcuaConnection {
   /** Returns the logger configured for this connection. */
   public getLogger(): Logger {
     return this.log;
+  }
+
+  /** Returns the resolved PLC namespace index, or null if not yet resolved. */
+  public getPlcNamespaceIndex(): number | null {
+    return this.plcNamespaceIndex;
   }
 
   // ============================================================
@@ -373,7 +379,10 @@ export class OpcuaConnection {
       this.persistSession();
     }
 
-    // 3. Keep-alive + WebSocket.
+    // 3. Resolve PLC namespace index.
+    await this.resolveNamespace();
+
+    // 4. Keep-alive + WebSocket.
     this.startSessionKeepAlive();
     if (this.config.enableWebSocket) {
       await this.connectWebSocket();
@@ -610,6 +619,55 @@ export class OpcuaConnection {
       sessionInfo: this.sessionInfo,
       cookies: Array.from(this.cookies.entries()),
     });
+  }
+
+  /**
+   * Read the OPC UA NamespaceArray node (ns=0;i=2255) to find the index of the
+   * B&R PLC namespace URI. Falls back to index 5 if the lookup fails.
+   */
+  private async resolveNamespace(): Promise<void> {
+    if (!this.sessionInfo) return;
+
+    const NAMESPACE_ARRAY_NODE = 'ns=0;i=2255';
+    const PLC_NAMESPACE_URI = 'http://br-automation.com/OpcUa/PLC/PV/';
+
+    try {
+      const url = `${this.baseUrl}/opcua/sessions/${this.sessionInfo.sessionId}/nodes/${encodeURIComponent(NAMESPACE_ARRAY_NODE)}/attributes/Value`;
+      const response = await this.fetchWithCookies(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.sessionInfo.sessionId}`,
+        },
+      });
+
+      if (!response.ok) {
+        this.log.warn(`Namespace resolution: HTTP ${response.status} — defaulting to ns=5`);
+        this.plcNamespaceIndex = 5;
+        return;
+      }
+
+      const data = await response.json();
+      const namespaces: string[] = data?.value;
+
+      if (!Array.isArray(namespaces)) {
+        this.log.warn('Namespace resolution: response was not an array — defaulting to ns=5');
+        this.plcNamespaceIndex = 5;
+        return;
+      }
+
+      const index = namespaces.indexOf(PLC_NAMESPACE_URI);
+      if (index === -1) {
+        this.log.warn(`Namespace resolution: '${PLC_NAMESPACE_URI}' not found in [${namespaces.join(', ')}] — defaulting to ns=5`);
+        this.plcNamespaceIndex = 5;
+      } else {
+        this.plcNamespaceIndex = index;
+        this.log.info(`PLC namespace resolved: ns=${index} (${PLC_NAMESPACE_URI})`);
+      }
+    } catch (error) {
+      this.log.warn('Namespace resolution failed — defaulting to ns=5:', error);
+      this.plcNamespaceIndex = 5;
+    }
   }
 
   // ============================================================
