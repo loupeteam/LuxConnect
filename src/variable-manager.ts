@@ -1,7 +1,7 @@
 import { OpcuaConnection } from './connection.js';
-import { 
-  OpcuaVariable, 
-  VariableChangeEvent, 
+import {
+  OpcuaVariable,
+  VariableChangeEvent,
   VariableChangeHandler,
   ErrorPolicy,
   OpcuaValue,
@@ -14,6 +14,7 @@ import {
   DEFAULT_NAMESPACE
 } from './variable-hierarchy.js';
 import { LuxConnectErrorCode, rejectWithError } from './errors.js';
+import { type Logger, silentLogger } from './logger.js';
 
 /**
  * Simplified variable manager using global state with deep copying
@@ -24,10 +25,11 @@ export class VariableManager {
   private hierarchy = new VariableHierarchy();
   private changeHandlers = new Map<string, VariableChangeHandler[]>();
   private globalChangeHandlers: VariableChangeHandler[] = [];
-  
+  private readonly log: Logger;
+
   // Error handling policy
   private errorPolicy: ErrorPolicy = 'default';
-  
+
   // NodeId generation settings
   private defaultNamespace: string = DEFAULT_NAMESPACE;
   private defaultApplication: string = ''; // Empty means use parser default
@@ -36,6 +38,9 @@ export class VariableManager {
 
   constructor(connection: OpcuaConnection) {
     this.connection = connection;
+    this.log = typeof connection.getLogger === 'function'
+      ? connection.getLogger()
+      : silentLogger;
   }
 
   /**
@@ -113,7 +118,7 @@ export class VariableManager {
       if (this.errorPolicy === 'default') {
         // Log the error in default mode
         const errorMsg = error?.message || String(error);
-        console.warn(`🔄 Operation failed for '${variableName}': ${errorMsg} (using cached/fallback value)`);
+        this.log.warn(`Operation failed for '${variableName}': ${errorMsg} (using cached/fallback value)`);
       }
       
       return cachedValue as T;
@@ -214,7 +219,7 @@ export class VariableManager {
           arrayDimensions = arrayParams.arrayDimensions.map(size => [0, size - 1] as [number, number]);
         }
       } catch (error) {
-        console.warn(`Could not read array parameters for '${name}': ${error}`);
+        this.log.warn(`Could not read array parameters for '${name}': ${error}`);
       }
     }
 
@@ -325,7 +330,7 @@ export class VariableManager {
           arrayDimensions = await this.readAttribute(targetNodeId, 'ArrayDimensions');
         } catch (error) {
           // ArrayDimensions might not be available for some nodes
-          console.warn(`Could not read ArrayDimensions for '${name}': ${error}`);
+          this.log.warn(`Could not read ArrayDimensions for '${name}': ${error}`);
         }
       }
 
@@ -447,7 +452,7 @@ export class VariableManager {
     }
 
     // Simple value write
-    await this.writeSingleValue(normalizedName, value, name);
+    await this.writeSingleValue(normalizedName, value);
   }
 
   /**
@@ -465,18 +470,18 @@ export class VariableManager {
     const normalizedBaseName = this.normalizeVariableName(baseVariableName);
     const arrayElementName = `${baseVariableName}[${index}]`;
 
-    try {      
+    try {
       try {
-        await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value, arrayElementName);
-        console.log(`✅ Direct write successful: ${arrayElementName} = ${JSON.stringify(value)}`);
+        await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value);
+        this.log.debug(`Direct write successful: ${arrayElementName} = ${JSON.stringify(value)}`);
         return; // Success! No need for fallback
       } catch (directWriteError) {
-        console.log(`⚠️ Direct write failed for ${arrayElementName}, falling back to read-modify-write`);
-        console.log(`   Direct write error: ${directWriteError instanceof Error ? directWriteError.message : String(directWriteError)}`);
+        this.log.debug(`Direct write failed for ${arrayElementName}, falling back to read-modify-write`);
+        this.log.debug(`   Direct write error: ${directWriteError instanceof Error ? directWriteError.message : String(directWriteError)}`);
       }
 
       // Fallback: Use read-modify-write approach
-      console.log(`🔧 Using read-modify-write fallback for primitive array element: ${baseVariableName}[${index}]`);
+      this.log.debug(`Using read-modify-write fallback for primitive array element: ${baseVariableName}[${index}]`);
       
       // Step 1: Read the entire array (readValue now handles unregistered variables)
       const currentArray = await this.readValue(baseVariableName);
@@ -495,9 +500,9 @@ export class VariableManager {
       modifiedArray[index] = value;
 
       // Step 4: Write the entire modified array back (writeSingleValue now handles unregistered variables)
-      await this.writeSingleValue(normalizedBaseName, modifiedArray, baseVariableName);
+      await this.writeSingleValue(normalizedBaseName, modifiedArray);
       
-      console.log(`✅ Read-modify-write successful: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
+      this.log.debug(`Read-modify-write successful: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -554,7 +559,8 @@ export class VariableManager {
           path
         });
       } catch (error) {
-        console.warn(`Could not build nodeId for sub-variable '${fullVariableName}': ${error}. Skipping.`);
+        this.log.warn(`Could not build nodeId for sub-variable '${fullVariableName}': ${error}. Skipping.`);
+        continue;
       }
     }
 
@@ -645,7 +651,7 @@ export class VariableManager {
               `status=${result?.status ?? '?'} opcua=${opcuaCode ?? '?'}`;
             const detail = `${writes[index].path} (nodeId=${writes[index].nodeId}): ${errorMsg}`;
             failures.push(detail);
-            console.warn(`Batch write failed for ${detail}`, result?.body ?? result);
+            this.log.warn(`Batch write failed for ${detail}`, result?.body ?? result);
           }
         });
 
@@ -653,7 +659,7 @@ export class VariableManager {
           throw new Error(`Failed to write some parts of complex variable '${originalName}':\n${failures.join('\n')}`);
         }
       } else {
-        console.warn(`Batch write for '${originalName}' returned no responses array; raw result:`, results);
+        this.log.warn(`Batch write for '${originalName}' returned no responses array; raw result:`, results);
       }
 
       // Update hierarchy for all successful writes
@@ -675,7 +681,7 @@ export class VariableManager {
 
     } catch (error) {
       // If batch write fails, fall back to individual writes
-      console.warn(`Batch write failed for '${originalName}', falling back to individual writes: ${error}`);
+      this.log.warn(`Batch write failed for '${originalName}', falling back to individual writes: ${error}`);
       
       const writePromises = writes.map(async write => {
         try {
@@ -693,7 +699,7 @@ export class VariableManager {
    * Write a single simple value
    * No registration required - builds NodeId dynamically
    */
-  private async writeSingleValue(normalizedName: string, value: OpcuaValue, _originalName: string): Promise<void> {
+  private async writeSingleValue(normalizedName: string, value: OpcuaValue): Promise<void> {
     const targetNodeId = this.getNodeIdForVar(normalizedName);
     await this.writeSingleValueByNodeId(targetNodeId, value);
 
@@ -894,7 +900,7 @@ export class VariableManager {
         try {
           handler(changeEvent);
         } catch (error) {
-          console.error(`Variable change handler error for '${name}':`, error);
+          this.log.error(`Variable change handler error for '${name}':`, error);
         }
       });
     }
@@ -904,7 +910,7 @@ export class VariableManager {
       try {
         handler(changeEvent);
       } catch (error) {
-        console.error(`Global change handler error for '${name}':`, error);
+        this.log.error(`Global change handler error for '${name}':`, error);
       }
     });
   }

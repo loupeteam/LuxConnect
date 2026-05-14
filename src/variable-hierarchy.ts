@@ -659,8 +659,6 @@ export class VariableHierarchy {
         Object.assign(current, newArray);
         Object.setPrototypeOf(current, Array.prototype);
         current.length = newArray.length;
-        
-        console.log(`Created array for segment: ${segment}, isArray: ${Array.isArray(current)}`);
       }
       
       const index = indices[0];

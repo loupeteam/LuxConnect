@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { VariableManager } from '../../src/variable-manager.js';
+import { consoleLogger } from '../../src/logger.js';
 
 describe('Error Handling System', () => {
   let variableManager: VariableManager;
   let mockConnection: any;
 
   beforeEach(() => {
-    // Create mock connection with all required methods
+    // Create mock connection with all required methods. `getLogger` is wired
+    // so VariableManager routes diagnostics through the Logger interface,
+    // which `consoleLogger` forwards to console.* — keeping the spies below
+    // working without coupling to a private logger.
     mockConnection = {
       apiRequest: vi.fn(),
       getSessionId: vi.fn(() => '1'),
       getSessionInfo: vi.fn(() => ({ sessionId: '1', timeout: 30000 })),
-      isConnected: vi.fn(() => true)
+      isConnected: vi.fn(() => true),
+      getLogger: vi.fn(() => consoleLogger)
     };
 
     variableManager = new VariableManager(mockConnection);
@@ -50,7 +55,7 @@ describe('Error Handling System', () => {
       
       expect(result).toBeUndefined();
       expect(consoleSpy).toHaveBeenCalled();
-      expect(consoleSpy.mock.calls[0][0]).toContain(`🔄 Operation failed for 'TestVar': Connection failed (using cached/fallback value)`);
+      expect(consoleSpy.mock.calls[0][0]).toContain(`Operation failed for 'TestVar': Connection failed (using cached/fallback value)`);
 
       consoleSpy.mockRestore();
     });
@@ -65,7 +70,7 @@ describe('Error Handling System', () => {
       
       expect(result).toBeUndefined();
       expect(consoleSpy).toHaveBeenCalled();
-      expect(consoleSpy.mock.calls[0][0]).toContain(`🔄 Operation failed for 'TestVar': Write failed (using cached/fallback value)`);
+      expect(consoleSpy.mock.calls[0][0]).toContain(`Operation failed for 'TestVar': Write failed (using cached/fallback value)`);
 
       consoleSpy.mockRestore();
     });

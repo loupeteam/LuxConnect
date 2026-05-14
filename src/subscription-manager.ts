@@ -938,7 +938,7 @@ export class SubscriptionManager {
           `⚠️ Batch remove: ${failures.length}/${itemsToRemove.length} monitored items FAILED for subscription ${subscription.subscriptionId}`
         );
       }
-      console.log(`✅ Batch remove completed: ${removed}/${itemsToRemove.length} items removed`);
+      this.log.info(`Batch remove completed: ${removed}/${itemsToRemove.length} items removed`);
     } catch (err) {
       // Fallback to individual operations if batch is not supported by the server.
       this.log.warn('Batch remove failed, falling back to individual operations:', err);

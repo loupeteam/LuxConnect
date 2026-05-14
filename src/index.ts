@@ -34,13 +34,13 @@
  * ```
  */
 
-// Build identification
+// Build identification.
+// Consumers can log the build timestamp themselves if they want a banner, e.g.:
+//   import { BUILD_TIMESTAMP } from 'lux-opcua';
+//   console.log(`[lux-opcua] build ${BUILD_TIMESTAMP}`);
+// (Library code intentionally does not log on module load so it doesn't
+// spam consumer output or break test runners.)
 export { BUILD_TIMESTAMP, BUILD_TIMESTAMP_MS } from './build-info.js';
-import { BUILD_TIMESTAMP } from './build-info.js';
-// Log once on module load so consumers can verify which build is loaded.
-if (typeof console !== 'undefined') {
-  console.log(`[lux-opcua] build ${BUILD_TIMESTAMP}`);
-}
 
 // Main Machine class (lux.js style)
 export { OpcuaMachine } from './opcua-machine.js';
