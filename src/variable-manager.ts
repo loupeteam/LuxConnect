@@ -658,7 +658,7 @@ export class VariableManager {
 
       // Update hierarchy for all successful writes
       const timestamp = new Date();
-      const quality = 'Good';
+      const quality = this.mapQualityCode(0);
 
       for (const write of writes) {
         const normalizedName = this.normalizeVariableName(write.varName);
