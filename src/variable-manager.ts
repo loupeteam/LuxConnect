@@ -452,7 +452,7 @@ export class VariableManager {
     }
 
     // Simple value write
-    await this.writeSingleValue(normalizedName, value, name);
+    await this.writeSingleValue(normalizedName, value);
   }
 
   /**
@@ -472,7 +472,7 @@ export class VariableManager {
 
     try {
       try {
-        await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value, arrayElementName);
+        await this.writeSingleValue(this.normalizeVariableName(arrayElementName), value);
         this.log.debug(`Direct write successful: ${arrayElementName} = ${JSON.stringify(value)}`);
         return; // Success! No need for fallback
       } catch (directWriteError) {
@@ -500,7 +500,7 @@ export class VariableManager {
       modifiedArray[index] = value;
 
       // Step 4: Write the entire modified array back (writeSingleValue now handles unregistered variables)
-      await this.writeSingleValue(normalizedBaseName, modifiedArray, baseVariableName);
+      await this.writeSingleValue(normalizedBaseName, modifiedArray);
       
       this.log.debug(`Read-modify-write successful: ${baseVariableName}[${index}] = ${JSON.stringify(value)}`);
 
@@ -699,7 +699,7 @@ export class VariableManager {
    * Write a single simple value
    * No registration required - builds NodeId dynamically
    */
-  private async writeSingleValue(normalizedName: string, value: OpcuaValue, _originalName: string): Promise<void> {
+  private async writeSingleValue(normalizedName: string, value: OpcuaValue): Promise<void> {
     const targetNodeId = this.getNodeIdForVar(normalizedName);
     await this.writeSingleValueByNodeId(targetNodeId, value);
 
