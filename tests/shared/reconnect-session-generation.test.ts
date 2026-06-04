@@ -8,8 +8,8 @@ import { mockConnectionConfig } from '../fixtures/test-data.js';
  * mapp Connect session ids are small integers that reset on a PLC reboot, so a
  * fresh session frequently reuses the dead session's id (e.g. `1`). The machine
  * must therefore decide "did the session change?" from the connection's session
- * *epoch*, not the session id — otherwise a reboot is misread as the same
- * session, subscriptions are never rebuilt, and monitored values freeze.
+ * *generation count*, not the session id — otherwise a reboot is misread as the
+ * same session, subscriptions are never rebuilt, and monitored values freeze.
  */
 describe('OpcuaMachine reconnection — session change detection', () => {
   function setup() {
@@ -20,9 +20,9 @@ describe('OpcuaMachine reconnection — session change detection', () => {
     // One active read group so there is something to (re)build on connect.
     machine.initCyclicRead('Temperature');
 
-    let epoch = 1;
+    let generationCount = 1;
     // The server reuses the SAME session id across the reboot.
-    vi.spyOn(connection, 'getSessionEpoch').mockImplementation(() => epoch);
+    vi.spyOn(connection, 'getSessionGenerationCount').mockImplementation(() => generationCount);
     vi.spyOn(connection, 'getSessionInfo').mockReturnValue({ sessionId: 1 } as any);
     vi.spyOn(connection, 'getPlcNamespaceIndex').mockReturnValue(5);
 
@@ -42,8 +42,8 @@ describe('OpcuaMachine reconnection — session change detection', () => {
       fire,
       clearSpy,
       buildSpy,
-      setEpoch: (e: number) => {
-        epoch = e;
+      setGenerationCount: (n: number) => {
+        generationCount = n;
       },
     };
   }
@@ -61,21 +61,21 @@ describe('OpcuaMachine reconnection — session change detection', () => {
     clearSpy.mockClear();
     buildSpy.mockClear();
 
-    // Same epoch (session survived the WS blip) → reconcile, never wipe.
+    // Same generation count (session survived the WS blip) → reconcile, never wipe.
     await fire('reconnecting');
     await fire('connected');
     expect(clearSpy).not.toHaveBeenCalled();
   });
 
   it('rebuilds after a PLC reboot even when the new session reuses the same id', async () => {
-    const { fire, clearSpy, buildSpy, setEpoch } = setup();
+    const { fire, clearSpy, buildSpy, setGenerationCount } = setup();
     await fire('connected');
     clearSpy.mockClear();
     buildSpy.mockClear();
 
     // PLC reboot: brand-new server-side session, but it got the same id (1).
-    // Only the epoch tells us it changed.
-    setEpoch(2);
+    // Only the generation count tells us it changed.
+    setGenerationCount(2);
     await fire('reconnecting');
     await fire('connected');
 

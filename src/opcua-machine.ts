@@ -833,22 +833,24 @@ export class OpcuaMachine {
   }
 
   /**
-   * Last session epoch we observed in the `connected` state. Used to distinguish:
+   * Last session generation count we observed in the `connected` state. Used to
+   * distinguish:
    *   - new session (server reboot or session timeout): old server-side
    *     subscriptions are gone with the session, so we must wipe local state
    *     and rebuild;
    *   - same session (transient WS drop, session survived): old server-side
    *     subscriptions still exist, leave them alone.
    *
-   * We deliberately track the connection's session *epoch* rather than the
-   * session id. mapp Connect session ids are small integers that reset on a
-   * PLC reboot, so a fresh session frequently reuses the dead session's id
+   * We deliberately track the connection's session *generation count* rather
+   * than the session id. mapp Connect session ids are small integers that reset
+   * on a PLC reboot, so a fresh session frequently reuses the dead session's id
    * (e.g. `1`). Comparing ids would then report "same session" after a reboot,
    * skip the rebuild, and leave every subscription pointing at a server-side
    * subscription that no longer exists — values freeze and stale-id requests
-   * spam 404s. The epoch bumps on every new session, so it's reuse-proof.
+   * spam 404s. The generation count bumps on every new session, so it's
+   * reuse-proof.
    */
-  private lastSessionEpoch: number | null = null;
+  private lastSessionGenerationCount: number | null = null;
 
   private setupWebSocketHandler(): void {
     // WebSocket notifications are handled inside SubscriptionManager.
@@ -868,9 +870,9 @@ export class OpcuaMachine {
         this.setDefaultNamespace(`ns=${nsIndex};s=`);
       }
 
-      const currentEpoch = this.connection.getSessionEpoch();
-      const sessionChanged = currentEpoch !== this.lastSessionEpoch;
-      this.lastSessionEpoch = currentEpoch;
+      const currentGenerationCount = this.connection.getSessionGenerationCount();
+      const sessionChanged = currentGenerationCount !== this.lastSessionGenerationCount;
+      this.lastSessionGenerationCount = currentGenerationCount;
 
       if (sessionChanged) {
         // New session: any local subscription ids reference the dead session.
