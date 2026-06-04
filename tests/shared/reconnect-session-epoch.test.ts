@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
-import { OpcuaMachine } from '../../src/opcua-machine.js'
-import { mockConnectionConfig } from '../fixtures/test-data.js'
+import { describe, it, expect, vi } from 'vitest';
+import { OpcuaMachine } from '../../src/opcua-machine.js';
+import { mockConnectionConfig } from '../fixtures/test-data.js';
 
 /**
  * Regression test for the PLC-reboot stale-subscription bug.
@@ -13,73 +13,73 @@ import { mockConnectionConfig } from '../fixtures/test-data.js'
  */
 describe('OpcuaMachine reconnection — session change detection', () => {
   function setup() {
-    const machine = new OpcuaMachine(mockConnectionConfig)
-    const connection = machine['connection'] as any
-    const sm = machine['subscriptionManager'] as any
+    const machine = new OpcuaMachine(mockConnectionConfig);
+    const connection = machine['connection'] as any;
+    const sm = machine['subscriptionManager'] as any;
 
     // One active read group so there is something to (re)build on connect.
-    machine.initCyclicRead('Temperature')
+    machine.initCyclicRead('Temperature');
 
-    let epoch = 1
+    let epoch = 1;
     // The server reuses the SAME session id across the reboot.
-    vi.spyOn(connection, 'getSessionEpoch').mockImplementation(() => epoch)
-    vi.spyOn(connection, 'getSessionInfo').mockReturnValue({ sessionId: 1 } as any)
-    vi.spyOn(connection, 'getPlcNamespaceIndex').mockReturnValue(5)
+    vi.spyOn(connection, 'getSessionEpoch').mockImplementation(() => epoch);
+    vi.spyOn(connection, 'getSessionInfo').mockReturnValue({ sessionId: 1 } as any);
+    vi.spyOn(connection, 'getPlcNamespaceIndex').mockReturnValue(5);
 
-    const clearSpy = vi.spyOn(sm, 'clearAllSubscriptions').mockImplementation(() => {})
-    vi.spyOn(sm, 'getAllSubscriptions').mockReturnValue(new Map([['default', {} as any]]))
+    const clearSpy = vi.spyOn(sm, 'clearAllSubscriptions').mockImplementation(() => {});
+    vi.spyOn(sm, 'getAllSubscriptions').mockReturnValue(new Map([['default', {} as any]]));
     const buildSpy = vi
       .spyOn(machine as any, 'doCreateOrUpdateSubscription')
-      .mockResolvedValue(undefined)
+      .mockResolvedValue(undefined);
 
     // The connection state handler the machine registered in its constructor.
-    const handlers = connection['connectionStateHandlers'] as Array<(s: string) => unknown>
+    const handlers = connection['connectionStateHandlers'] as Array<(s: string) => unknown>;
     const fire = async (state: string) => {
-      for (const h of handlers) await h(state)
-    }
+      for (const h of handlers) await h(state);
+    };
 
     return {
       fire,
       clearSpy,
       buildSpy,
       setEpoch: (e: number) => {
-        epoch = e
+        epoch = e;
       },
-    }
+    };
   }
 
   it('rebuilds on first connect', async () => {
-    const { fire, clearSpy, buildSpy } = setup()
-    await fire('connected')
-    expect(clearSpy).toHaveBeenCalledTimes(1)
-    expect(buildSpy).toHaveBeenCalled()
-  })
+    const { fire, clearSpy, buildSpy } = setup();
+    await fire('connected');
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+    expect(buildSpy).toHaveBeenCalled();
+  });
 
   it('does NOT wipe state on a transient drop that keeps the same session', async () => {
-    const { fire, clearSpy, buildSpy } = setup()
-    await fire('connected')
-    clearSpy.mockClear()
-    buildSpy.mockClear()
+    const { fire, clearSpy, buildSpy } = setup();
+    await fire('connected');
+    clearSpy.mockClear();
+    buildSpy.mockClear();
 
     // Same epoch (session survived the WS blip) → reconcile, never wipe.
-    await fire('reconnecting')
-    await fire('connected')
-    expect(clearSpy).not.toHaveBeenCalled()
-  })
+    await fire('reconnecting');
+    await fire('connected');
+    expect(clearSpy).not.toHaveBeenCalled();
+  });
 
   it('rebuilds after a PLC reboot even when the new session reuses the same id', async () => {
-    const { fire, clearSpy, buildSpy, setEpoch } = setup()
-    await fire('connected')
-    clearSpy.mockClear()
-    buildSpy.mockClear()
+    const { fire, clearSpy, buildSpy, setEpoch } = setup();
+    await fire('connected');
+    clearSpy.mockClear();
+    buildSpy.mockClear();
 
     // PLC reboot: brand-new server-side session, but it got the same id (1).
     // Only the epoch tells us it changed.
-    setEpoch(2)
-    await fire('reconnecting')
-    await fire('connected')
+    setEpoch(2);
+    await fire('reconnecting');
+    await fire('connected');
 
-    expect(clearSpy).toHaveBeenCalledTimes(1)
-    expect(buildSpy).toHaveBeenCalled()
-  })
-})
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+    expect(buildSpy).toHaveBeenCalled();
+  });
+});
