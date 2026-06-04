@@ -132,17 +132,22 @@ export class SubscriptionManager {
       throw new Error(`Subscription '${name}' not found`);
     }
 
-    // Remove all monitored items from client handle map
+    // Remove local state FIRST, before the server round-trip. If the server
+    // DELETE below rejects (e.g. 404 "Could not find subscriptionId" because
+    // the subscription already died with its session after a PLC reboot), the
+    // local entry must still be gone. Otherwise a caller's delete-and-retry
+    // recovery (see OpcuaMachine.doCreateOrUpdateSubscription) keeps finding the
+    // stale subscription on every pass and loops forever, re-issuing the
+    // failing monitored-item batch each time. This mirrors removeMonitoredItem.
     for (const [, monitoredItem] of subscription.monitoredItems) {
       this.clientHandleMap.delete(monitoredItem.clientHandle);
     }
+    this.subscriptions.delete(name);
 
-    // Delete subscription on server
+    // Delete subscription on server (best-effort — local state already cleaned up).
     await this.connection.apiRequest(`/opcua/sessions/${this.connection.getSessionInfo()?.sessionId}/subscriptions/${subscription.subscriptionId}`, {
       method: 'DELETE'
     });
-
-    this.subscriptions.delete(name);
   }
 
   /**

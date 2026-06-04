@@ -118,6 +118,27 @@ describe('Subscription Consolidation Logic', () => {
     );
   });
 
+  it('removes local subscription state even when the server DELETE 404s (PLC reboot)', async () => {
+    // After a PLC reboot the server forgets the subscription, so DELETE returns
+    // 404. deleteSubscription must still purge local state — otherwise callers'
+    // delete-and-retry recovery loops forever on the stale entry.
+    await subscriptionManager.createSubscription('StaleSub');
+    expect(subscriptionManager.getSubscription('StaleSub')).toBeDefined();
+
+    mockApiRequest.mockImplementationOnce((url: string, options: any) => {
+      if (url.includes('/subscriptions/') && options?.method === 'DELETE') {
+        // Mirror how OpcuaConnection.apiRequest rejects on a non-OK response.
+        return Promise.reject(new Error('API request failed: 404 - Could not find subscriptionId'));
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) });
+    });
+
+    await expect(subscriptionManager.deleteSubscription('StaleSub')).rejects.toThrow('404');
+
+    // The local entry is gone despite the server error — the loop can't recur.
+    expect(subscriptionManager.getSubscription('StaleSub')).toBeUndefined();
+  });
+
   it('should calculate toRemove correctly from monitoredItems', async () => {
     // Create subscription
     await subscriptionManager.createSubscription('TestSub');

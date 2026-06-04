@@ -48,6 +48,19 @@ export class OpcuaConnection {
 
   // -------- State --------
   private sessionInfo: SessionInfo | null = null;
+  /**
+   * Monotonic counter bumped every time a brand-new OPC UA session is created
+   * (see `createSession`). Consumers use this — NOT the session id — to detect
+   * that the server-side session (and therefore all its subscriptions and
+   * monitored items) was replaced.
+   *
+   * The session id alone is unreliable for this: mapp Connect session ids are
+   * small integers that reset to low values when the PLC reboots, so a fresh
+   * session frequently gets the SAME numeric id as the dead one (e.g. `1`).
+   * Keying "did the session change?" off id equality therefore misses PLC
+   * reboots and leaves stale subscription state in place.
+   */
+  private sessionEpoch = 0;
   private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
   private readonly webSocketManager: WebSocketManager;
   private plcNamespaceIndex: number | null = null;
@@ -106,6 +119,15 @@ export class OpcuaConnection {
   /** Returns the resolved PLC namespace index, or null if not yet resolved. */
   public getPlcNamespaceIndex(): number | null {
     return this.plcNamespaceIndex;
+  }
+
+  /**
+   * Returns the current session epoch. Increments each time a new OPC UA
+   * session is created, so callers can reliably detect a session replacement
+   * (e.g. after a PLC reboot) even when the server reuses the same session id.
+   */
+  public getSessionEpoch(): number {
+    return this.sessionEpoch;
   }
 
   // ============================================================
@@ -519,6 +541,9 @@ export class OpcuaConnection {
       username: usedAnonymousFallback ? (authData?.username ?? 'anonymous') : (authData?.username ?? this.config.username ?? 'anonymous'),
       roles: authData?.roles ?? [],
     };
+    // A brand-new server-side session means every previously-known
+    // subscription/monitored item is gone. Bump the epoch so consumers rebuild.
+    this.sessionEpoch++;
     this.log.info('OPC UA session created', {
       sessionId: this.sessionInfo.sessionId,
       username: this.sessionInfo.username,

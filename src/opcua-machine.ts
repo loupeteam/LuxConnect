@@ -745,7 +745,7 @@ export class OpcuaMachine {
     this.subscriptionUpdateTimers.set(readGroupName, timer);
   }
 
-  private async doCreateOrUpdateSubscription(readGroupName: string): Promise<void> {
+  private async doCreateOrUpdateSubscription(readGroupName: string, isStaleRetry = false): Promise<void> {
     const group = this.readGroups.get(readGroupName);
     if (!group || !group.options.enabled || group.variables.size === 0) {
       return;
@@ -795,8 +795,11 @@ export class OpcuaMachine {
     } catch (error) {
       // If the subscription was stale on the server (e.g. from a previous session that
       // disconnected mid-flight), delete it locally and retry once from scratch.
+      // The `isStaleRetry` guard makes "once" a hard limit: without it, a
+      // server-side subscription that stays 404 would recurse forever, re-issuing
+      // the failing monitored-item batch on every pass.
       const msg = (error as Error).message ?? '';
-      if (msg.includes('not found on server')) {
+      if (msg.includes('not found on server') && !isStaleRetry) {
         this.log.warn(`Subscription '${readGroupName}' was stale — deleting and retrying...`);
         try {
           await this.subscriptionManager.deleteSubscription(readGroupName);
@@ -804,7 +807,7 @@ export class OpcuaMachine {
           // Ignore — the subscription may already be gone server-side
         }
         try {
-          await this.doCreateOrUpdateSubscription(readGroupName);
+          await this.doCreateOrUpdateSubscription(readGroupName, true);
         } catch (retryError) {
           this.log.error(`Retry also failed for subscription '${readGroupName}':`, retryError);
         }
@@ -830,14 +833,22 @@ export class OpcuaMachine {
   }
 
   /**
-   * Last sessionId we observed in the `connected` state. Used to distinguish:
+   * Last session epoch we observed in the `connected` state. Used to distinguish:
    *   - new session (server reboot or session timeout): old server-side
    *     subscriptions are gone with the session, so we must wipe local state
    *     and rebuild;
    *   - same session (transient WS drop, session survived): old server-side
    *     subscriptions still exist, leave them alone.
+   *
+   * We deliberately track the connection's session *epoch* rather than the
+   * session id. mapp Connect session ids are small integers that reset on a
+   * PLC reboot, so a fresh session frequently reuses the dead session's id
+   * (e.g. `1`). Comparing ids would then report "same session" after a reboot,
+   * skip the rebuild, and leave every subscription pointing at a server-side
+   * subscription that no longer exists — values freeze and stale-id requests
+   * spam 404s. The epoch bumps on every new session, so it's reuse-proof.
    */
-  private lastConnectedSessionId: string | null = null;
+  private lastSessionEpoch: number | null = null;
 
   private setupWebSocketHandler(): void {
     // WebSocket notifications are handled inside SubscriptionManager.
@@ -857,9 +868,9 @@ export class OpcuaMachine {
         this.setDefaultNamespace(`ns=${nsIndex};s=`);
       }
 
-      const currentSessionId = this.connection.getSessionInfo()?.sessionId ?? null;
-      const sessionChanged = currentSessionId !== this.lastConnectedSessionId;
-      this.lastConnectedSessionId = currentSessionId;
+      const currentEpoch = this.connection.getSessionEpoch();
+      const sessionChanged = currentEpoch !== this.lastSessionEpoch;
+      this.lastSessionEpoch = currentEpoch;
 
       if (sessionChanged) {
         // New session: any local subscription ids reference the dead session.
