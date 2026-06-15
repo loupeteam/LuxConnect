@@ -116,7 +116,7 @@ export interface ConnectionConfig {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   logger?: any;
   /**
-   * Optional session persistence store. Defaults to a `localStorage`-backed
+   * Optional session persistence store. Defaults to a `sessionStorage`-backed
    * store so SPA navigations can reuse the existing connection session.
    * Pass `false` to disable persistence (each `connect()` creates a fresh
    * session) or a custom `SessionStore` implementation to plug in your own.

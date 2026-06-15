@@ -29,5 +29,5 @@ export const SESSION_DELETE_TIMEOUT_MS = 5_000;
 /** Default max OPC UA request/response message size, in bytes. */
 export const DEFAULT_MAX_MESSAGE_SIZE = 65_536;
 
-/** localStorage key used by the default SessionStore implementation. */
+/** sessionStorage key used by the default SessionStore implementation. */
 export const SESSION_STORAGE_KEY = 'opcua_session_info';
