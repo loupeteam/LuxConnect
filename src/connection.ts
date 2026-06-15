@@ -95,7 +95,7 @@ export class OpcuaConnection {
     this.log = (config.logger as Logger | undefined) ?? consoleLogger;
     this.webSocketManager = new WebSocketManager(this.log);
 
-    // Session persistence: default-on with localStorage; opt out by passing `false`.
+    // Session persistence: default-on with sessionStorage; opt out by passing `false`.
     if (config.sessionStore === false) {
       this.sessionStore = null;
     } else if (config.sessionStore) {
