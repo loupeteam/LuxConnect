@@ -1,34 +1,32 @@
 /**
- * lux-opcua - TypeScript OPC UA Client Library
+ * @loupeteam/lux-connect — TypeScript OPC UA client for B&R mapp Connect.
  *
- * A modern TypeScript library for OPC UA client operations with lux.js-style patterns.
- * Provides high-level abstractions for variable management, subscriptions, and real-time monitoring.
+ * Provides {@link OpcuaMachine} for subscription-based value mirroring,
+ * one-shot reads/writes, and connection lifecycle management.
  *
  * @example
  * ```typescript
- * import { OpcuaMachine } from 'lux-opcua';
+ * import { OpcuaMachine } from '@loupeteam/lux-connect';
  *
  * const machine = new OpcuaMachine({
  *   host: 'localhost',
- *   port: 80,
+ *   port: 443,
+ *   protocol: 'https',
  *   username: 'user',
- *   password: 'pass'
+ *   password: 'pass',
  * });
  *
- * // Connect and setup cyclic reading (lux.js style)
  * await machine.connect();
- * machine.initCyclicRead('Temperature');
  *
- * // Direct property access (lux.js style)
- * console.log(machine.Temperature); // Read value
- * machine.Temperature = 25.5;       // Write value
- *
- * // Change callbacks
- * machine.onChange('Temperature', (value) => {
+ * // Subscribe to a variable; the callback fires on each change.
+ * machine.initCyclicRead('Temperature', (value) => {
  *   console.log(`Temperature changed to ${value}`);
  * });
  *
- * // Explicit read/write with await
+ * // Read the last cached value (populated by the subscription above).
+ * console.log(machine.Temperature);
+ *
+ * // One-shot async read/write.
  * const temp = await machine.readVariable('Temperature');
  * await machine.writeVariable('Temperature', 30.0);
  * ```
@@ -36,8 +34,8 @@
 
 // Build identification.
 // Consumers can log the build timestamp themselves if they want a banner, e.g.:
-//   import { BUILD_TIMESTAMP } from 'lux-opcua';
-//   console.log(`[lux-opcua] build ${BUILD_TIMESTAMP}`);
+//   import { BUILD_TIMESTAMP } from '@loupeteam/lux-connect';
+//   console.log(`[lux-connect] build ${BUILD_TIMESTAMP}`);
 // (Library code intentionally does not log on module load so it doesn't
 // spam consumer output or break test runners.)
 export { BUILD_TIMESTAMP, BUILD_TIMESTAMP_MS } from './build-info.js';
