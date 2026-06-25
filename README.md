@@ -127,10 +127,14 @@ Create `mappConnect/Config.mappconnect` and register the `mappConnect` package i
 the CPU's `Cpu.pkg` (`<Object Type="Package">mappConnect</Object>`). Point its
 OPC UA whitelist at the local OPC UA server.
 
-> **What to change:** the SSL port (`WebServerPortSsl=8443`) and `Interface=All`
-> are correct **by default** — leave them. What you actually add/set is the
-> `WebServerEndpointConfiguration` (step 3), the `SSLConfiguration` reference
-> (step 5), and the `OpcUaServerWhitelist` URL.
+> **What to change:** the port and `Interface=All` are correct **by default** —
+> leave them. What you actually add/set is the `WebServerEndpointConfiguration`
+> (step 3), the `SSLConfiguration` reference (step 5), and the
+> `OpcUaServerWhitelist` URL.
+>
+> **Ports:** mapp Connect listens on **`8443` for HTTPS** (`WebServerPortSsl`) and
+> **`8080` for HTTP** (`WebServerPort`). Match your LuxConnect `protocol`/`port` to
+> the one you use — `https`→`8443`, `http`→`8080`.
 
 ### 3. Open the REST API endpoint — `/api/1.0/*` must be allowed ⚠️
 
@@ -296,6 +300,44 @@ is missing, revisit step 1; if `8443` is missing, revisit step 2.
 > # or against a real PLC: npm run diagnose -- --host 192.168.1.100 --user admin --pass ...
 > ```
 
+## 🧩 Dev Server Proxy (Vite / webpack)
+
+In development your app is served from a dev server (e.g. Vite on `:5173`) on a
+different origin than the PLC, so you proxy `/api/*` to mapp Connect to avoid CORS.
+**The proxy must forward WebSockets too** — LuxConnect uses a WebSocket
+(`/api/1.0/pushchannel`) for subscriptions, which is how live values arrive. If the
+proxy only forwards HTTP, auth and session creation succeed over REST but the
+WebSocket never connects, so **the app connects but no value ever updates.**
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://127.0.0.1:8443', // PLC / ARsim mapp Connect — HTTPS:8443, HTTP:8080
+        changeOrigin: true,
+        secure: false,   // accept mapp Connect's self-signed cert
+        ws: true,        // REQUIRED: proxy the pushchannel WebSocket for subscriptions
+      },
+    },
+  },
+});
+```
+
+> **Symptom if `ws: true` is missing:** the console shows a successful auth /
+> `OPC UA session created`, then repeating
+> `Connecting WebSocket to: ws://localhost:5173/api/1.0/pushchannel…` followed by
+> `WebSocket connection timeout` and `can't establish a connection to ws://…/pushchannel`,
+> looping on `Scheduling reconnect in 5000ms…`. REST is fine; only the subscription
+> channel is broken.
+>
+> Because `npm run diagnose` probes the PLC directly (bypassing the dev proxy), it
+> will **pass** in this case — a green diagnostic combined with WebSocket errors in
+> the browser points squarely at the dev-server proxy, not the PLC.
+
 ## 📚 Detailed Usage
 
 ### Connection Configuration
@@ -304,7 +346,7 @@ is missing, revisit step 1; if `8443` is missing, revisit step 2.
 const machine = new OpcuaMachine({
   // Server connection
   host: 'localhost',
-  port: 8443,
+  port: 8443,                 // mapp Connect: 8443 for https, 8080 for http
   protocol: 'https',          // 'http' | 'https'
   
   // Authentication
@@ -1027,6 +1069,20 @@ Structured error handling
 ✅ Enable read group: machine.setReadGroupEnable('default', true)
 ✅ Check connection state: machine.connectionState
 ✅ Verify variable exists on server
+✅ In dev: confirm your proxy forwards WebSockets (ws: true) — see below
+```
+
+**Connects but No Live Updates / WebSocket Timeout (dev server proxy)**
+```
+✅ Add `ws: true` to your dev-server proxy (Vite/webpack) for the /api route —
+   REST works without it, but the /api/1.0/pushchannel WebSocket won't proxy,
+   so subscriptions (and therefore live values) never connect
+✅ Symptom: auth + "OPC UA session created" succeed, then repeating
+   "WebSocket connection timeout" / "can't establish a connection to
+   ws://.../api/1.0/pushchannel" and "Scheduling reconnect in 5000ms…"
+✅ Also set secure: false (self-signed cert) and changeOrigin: true
+✅ npm run diagnose passes here (it probes the PLC directly) → the issue is the
+   dev proxy, not the PLC. See "Dev Server Proxy" above.
 ```
 
 **Performance Issues**
