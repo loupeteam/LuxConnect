@@ -286,6 +286,16 @@ is missing, revisit step 1; if `8443` is missing, revisit step 2.
 | 5 | SSL configs defined + certificate created/linked | `*.sslcfg`, `CertificateStore/OwnCertificates` | Server won't bind TLS; HTTPS/OPC UA endpoint unreachable |
 | 6 | User + role node permissions | `User.user`, `UaDvConfig.uadcfg` | Auth OK but reads denied |
 | 7 | Both `8443` and `4840` listening | — | Verifies steps 1–2 |
+
+> **Check it automatically:** run the bundled diagnostic, which performs the live
+> probes (steps 1–7) and statically scans an AS project for the settings above,
+> pointing each finding back to the relevant step:
+>
+> ```bash
+> npm run diagnose -- --project ../path/to/AsProject
+> # or against a real PLC: npm run diagnose -- --host 192.168.1.100 --user admin --pass ...
+> ```
+
 ## 📚 Detailed Usage
 
 ### Connection Configuration
@@ -993,6 +1003,11 @@ Structured error handling
 | `PERMISSION_DENIED` | Access rights insufficient | No |
 
 ## 🐛 Troubleshooting
+
+> **Start here:** `npm run diagnose` checks the whole chain (mapp Connect port,
+> REST API authorization, OPC UA port) and — with `--project <path>` — the AS
+> project config. It pinpoints most connection problems in one command and cites
+> the fix. See [Configuring the Automation Studio Project](#-configuring-the-automation-studio-project).
 
 ### Common Issues
 
