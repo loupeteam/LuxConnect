@@ -45,6 +45,25 @@ This directory contains utility scripts for development, testing, and serving th
   - Direct: `node scripts/serve-browser-tests.js`
 - **Default Route**: `/tests/browser/browser-standalone.html`
 
+### 🩺 **Diagnostics Scripts**
+
+#### `diagnose-connection.js` - Connection Diagnostics
+- **Purpose**: Pinpoint LuxConnect ↔ mapp Connect ↔ OPC UA connection problems
+- **Checks**:
+  - **Live probes** (local ARsim or remote PLC): mapp Connect port listening,
+    REST API reachable + `/api/1.0/*` authorized (the 403 gotcha), optional
+    authenticated `/auth`, OPC UA C/S port listening
+  - **Static scan** (`--project <path>`): `OpcUaCs=1`, the `/api/1.0/*` endpoint,
+    SSL config references resolve, certificate linked, `mappConnect` registered in
+    `Cpu.pkg`, variables/whitelist present
+- **Usage**:
+  - `npm run diagnose -- --project ../MyAsProject`
+  - `npm run diagnose -- --host 192.168.1.100 --user admin --pass secret`
+  - Direct: `node scripts/diagnose-connection.js --help`
+- **Output**: PASS/WARN/FAIL per check, each FAIL citing the matching README step
+- **Exit code**: non-zero if any check fails (CI-friendly)
+- **Dependencies**: Node stdlib only
+
 ### 🧪 **Testing Scripts**
 
 #### `validate-browser-tests.js` - Browser Test Validator

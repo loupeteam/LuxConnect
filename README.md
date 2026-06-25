@@ -91,6 +91,253 @@ await machine.changeUser('admin', 'admin123');
 - Session remains active - no reconnection required
 ```
 
+## 🏭 Configuring the Automation Studio Project
+
+LuxConnect talks to **mapp Connect** (the HTTPS REST/WebSocket gateway, default
+port `8443`), which in turn bridges to the PLC's **OPC UA C/S server** (default
+`opc.tcp://127.0.0.1:4840`). The data path is:
+
+```
+LuxConnect (browser/Node)  ──HTTPS──▶  mapp Connect : 8443  ──OPC UA──▶  OPC UA C/S server : 4840  ──▶  PLC variables
+```
+
+If **any** link in that chain is missing, you get a connection that *looks* fine
+but never delivers values. The checklist below is what an AS project must have.
+All config files live under `Physical/<Config>/<CPU>/`.
+
+### 1. Enable the OPC UA C/S server (most common miss)
+
+`Connectivity/OpcUaCs/UaCsConfig.uacfg` — the master enable defaults to **off**:
+
+```xml
+<Property ID="OpcUaCs" Value="1" />   <!-- 0 = disabled (default!), 1 = enabled -->
+```
+
+> **What to change:** only `OpcUaCs` (set to `1`) and `AppCertificateStoreConfiguration`
+> (the SSL config reference — see step 5). **Everything else in this file is fine at
+> its default** (TCP port `4840`, security policies, identity tokens, limits).
+
+> **Symptom if missing:** LuxConnect authenticates against mapp Connect fine, but
+> no variable ever updates. Nothing listens on `4840`, so mapp Connect has no
+> server to read from.
+
+### 2. Add a mapp Connect configuration
+
+Create `mappConnect/Config.mappconnect` and register the `mappConnect` package in
+the CPU's `Cpu.pkg` (`<Object Type="Package">mappConnect</Object>`). Point its
+OPC UA whitelist at the local OPC UA server.
+
+> **What to change:** the port and `Interface=All` are correct **by default** —
+> leave them. What you actually add/set is the `WebServerEndpointConfiguration`
+> (step 3), the `SSLConfiguration` reference (step 5), and the
+> `OpcUaServerWhitelist` URL.
+>
+> **Ports:** mapp Connect listens on **`8443` for HTTPS** (`WebServerPortSsl`) and
+> **`8080` for HTTP** (`WebServerPort`). Match your LuxConnect `protocol`/`port` to
+> the one you use — `https`→`8443`, `http`→`8080`.
+
+### 3. Open the REST API endpoint — `/api/1.0/*` must be allowed ⚠️
+
+**This is the easiest thing to get wrong.** mapp Connect's
+`WebServerEndpointConfiguration` controls which web/REST endpoints are reachable
+and by which roles. If it is **absent**, mapp Connect denies every request with
+**HTTP 403 Forbidden** — and LuxConnect's reachability probe (`GET /api/1.0/auth`)
+only treats `200`, `401`, or `405` as "reachable", so it aborts before it ever
+sends credentials. A valid username/password will **still** 403 without this block.
+
+A minimal working `Config.mappconnect`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<?AutomationStudio FileVersion="4.9"?>
+<Configuration>
+  <Element ID="mapp Connect Configuration" Type="mappconnect">
+    <Selector ID="WebServerProtocol">
+      <Property ID="WebServerPortSsl" Value="8443" />
+      <Property ID="Interface" Value="All" />
+      <Property ID="SSLConfiguration" Value="SSLConfiguration" />
+    </Selector>
+    <Group ID="WebServerEndpointConfiguration">
+      <Group ID="Endpoint[1]" Description="Allow .html files for all users">
+        <Property ID="Endpoint" Value="/*" />
+        <Group ID="Roles" />
+      </Group>
+      <Group ID="Endpoint[2]" Description="Allow stylesheet files for all users">
+        <Property ID="Endpoint" Value="/css/*.css" />
+        <Group ID="Roles" />
+      </Group>
+      <Group ID="Endpoint[3]" Description="Allow javascript files for all users">
+        <Property ID="Endpoint" Value="/js/*.js" />
+        <Group ID="Roles" />
+      </Group>
+      <Group ID="Endpoint[4]" Description="Allow all API endpoints for all users">
+        <Property ID="Endpoint" Value="/api/1.0/*" />
+        <Group ID="Roles" />   <!-- empty = no role restriction (all users) -->
+      </Group>
+    </Group>
+    <Group ID="OpcUaServerWhitelist">
+      <Group ID="OpcUaServer[1]">
+        <Property ID="Url" Value="opc.tcp://127.0.0.1:4840" />
+      </Group>
+    </Group>
+  </Element>
+</Configuration>
+```
+
+> **Symptom if missing:** `GET /api/1.0/auth` returns **403** (both unauthenticated
+> and with valid credentials), and LuxConnect logs
+> `Server reachability test failed: HTTP 403: Forbidden` followed by repeated
+> reconnect attempts.
+
+### 4. Expose the variables in the OPC UA address map
+
+`Connectivity/OpcUaCs/<map>.uad` lists the tasks/PVs published over OPC UA. Use
+recursion to expose every member of a struct:
+
+```xml
+<Task Name="FolderChk">
+  <Variable Name="task" RecursiveEnable="2" />   <!-- exposes task.out.done, etc. -->
+</Task>
+```
+
+### 5. Define the SSL configurations and create a certificate
+
+Both servers reference an SSL configuration **by name**, and those names are *not*
+created automatically — **you must define them yourself** in the AS project, and
+attach a certificate to each. Two distinct configs are involved:
+
+| Referenced by | Property | Typical name | SSL config type |
+|---------------|----------|--------------|-----------------|
+| mapp Connect (`Config.mappconnect`) | `SSLConfiguration` | `SSLConfiguration` | `CommonSslCfg` (HTTPS) |
+| OPC UA server (`UaCsConfig.uacfg`) | `AppCertificateStoreConfiguration` | `OPCConfiguration` | `OpcUaServerSslCfg` |
+
+Steps in Automation Studio:
+
+1. **Create an own certificate + private key** under
+   `AccessAndSecurity → CertificateStore → OwnCertificates`
+   (e.g. `Certificates/MyCert.cer` + `PrivateKeys/MyKey.key`).
+2. **Define each SSL configuration** under
+   `AccessAndSecurity → TransportLayerSecurity` (`*.sslcfg`) — one `CommonSslCfg`
+   element for mapp Connect's HTTPS and one `OpcUaServerSslCfg` element for the
+   OPC UA server — and point each one's `OwnCertificate` / `OwnCertificatePrivateKey`
+   at the cert/key from step 1:
+
+   ```xml
+   <Element ID="SSLConfiguration" Type="SSLCFG">       <!-- referenced by Config.mappconnect -->
+     <Selector ID="SSLCfgType" Value="CommonSslCfg">
+       <Group ID="OwnCertificate">
+         <Property ID="OwnCertificate" Value="MyCert.cer" />
+         <Property ID="OwnCertificatePrivateKey" Value="MyKey.key" />
+       </Group>
+     </Selector>
+   </Element>
+   <Element ID="OPCConfiguration" Type="SSLCFG">        <!-- referenced by UaCsConfig.uacfg -->
+     <Selector ID="SSLCfgType" Value="OpcUaServerSslCfg">
+       <Group ID="OwnCertificate">
+         <Property ID="OwnCertificate" Value="MyCert.cer" />
+         <Property ID="OwnCertificatePrivateKey" Value="MyKey.key" />
+       </Group>
+     </Selector>
+   </Element>
+   ```
+
+3. **Make the names match.** The `Value` of `SSLConfiguration` in `Config.mappconnect`
+   and of `AppCertificateStoreConfiguration` in `UaCsConfig.uacfg` must equal the
+   `Element ID`s you defined. A dangling reference means the server can't bind its
+   TLS endpoint.
+
+> **What to change:** only `OwnCertificate` / `OwnCertificatePrivateKey` (point them
+> at your cert/key). Within each element the SSL/TLS cipher suite is fine at its
+> default, and **"Validate SSL communication" (`ValidateCommBuddy`) is `off` by
+> default** for both the `CommonSslCfg` and the `OpcUaServerSslCfg` — leave it unless
+> you intend to validate the peer certificate.
+
+> The certificate is self-signed for development; the browser will warn on first
+> connect. For a quick local start you can reuse the example cert shipped with this
+> repo (see the security note below), but generate your own before real hardware.
+
+### 6. Users, roles, and node permissions
+
+- **A user** in `AccessAndSecurity/UserRoleSystem/User.user` (with a role) — LuxConnect
+  passes its `username`/`password` here.
+- **Node permissions** for that role in `Connectivity/OpcUaCs/UaDvConfig.uadcfg`
+  (`DefaultRolePermissions` → `PermissionRead`/`PermissionWrite`/`PermissionBrowse`…).
+  A role with no permissions can authenticate but reads nothing. In this file
+  **only `DefaultRolePermissions` is project-specific** — everything else is default.
+- The OPC UA server's security policy + identity tokens (`UaCsConfig.uacfg`) must
+  match how LuxConnect connects (e.g. `UserName` token + `SignAndEncrypt`).
+
+### 7. Verify both ports are actually listening
+
+After deploying (and reaching **RUN** mode), confirm the chain is up:
+
+```powershell
+# Windows
+Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 4840,8443 }
+```
+
+You should see **both** `8443` (mapp Connect) and `4840` (OPC UA C/S). If `4840`
+is missing, revisit step 1; if `8443` is missing, revisit step 2.
+
+### Configuration checklist
+
+| # | Requirement | File | Symptom if missing |
+|---|-------------|------|--------------------|
+| 1 | OPC UA C/S server enabled (`OpcUaCs=1`) | `UaCsConfig.uacfg` | Connects, but no values update; `4840` not listening |
+| 2 | mapp Connect config present + in `Cpu.pkg` | `Config.mappconnect`, `Cpu.pkg` | `8443` not listening |
+| 3 | `/api/1.0/*` endpoint allowed (empty Roles) | `Config.mappconnect` | **403 on `/api/1.0/auth`**, even with valid creds |
+| 4 | Variables exposed (with recursion) | `*.uad` | `Bad_NodeIdUnknown` / variable not found |
+| 5 | SSL configs defined + certificate created/linked | `*.sslcfg`, `CertificateStore/OwnCertificates` | Server won't bind TLS; HTTPS/OPC UA endpoint unreachable |
+| 6 | User + role node permissions | `User.user`, `UaDvConfig.uadcfg` | Auth OK but reads denied |
+| 7 | Both `8443` and `4840` listening | — | Verifies steps 1–2 |
+
+> **Check it automatically:** run the bundled diagnostic, which performs the live
+> probes (steps 1–7) and statically scans an AS project for the settings above,
+> pointing each finding back to the relevant step:
+>
+> ```bash
+> npm run diagnose -- --project ../path/to/AsProject
+> # or against a real PLC: npm run diagnose -- --host 192.168.1.100 --user admin --pass ...
+> ```
+
+## 🧩 Dev Server Proxy (Vite / webpack)
+
+In development your app is served from a dev server (e.g. Vite on `:5173`) on a
+different origin than the PLC, so you proxy `/api/*` to mapp Connect to avoid CORS.
+**The proxy must forward WebSockets too** — LuxConnect uses a WebSocket
+(`/api/1.0/pushchannel`) for subscriptions, which is how live values arrive. If the
+proxy only forwards HTTP, auth and session creation succeed over REST but the
+WebSocket never connects, so **the app connects but no value ever updates.**
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://127.0.0.1:8443', // PLC / ARsim mapp Connect — HTTPS:8443, HTTP:8080
+        changeOrigin: true,
+        secure: false,   // accept mapp Connect's self-signed cert
+        ws: true,        // REQUIRED: proxy the pushchannel WebSocket for subscriptions
+      },
+    },
+  },
+});
+```
+
+> **Symptom if `ws: true` is missing:** the console shows a successful auth /
+> `OPC UA session created`, then repeating
+> `Connecting WebSocket to: ws://localhost:5173/api/1.0/pushchannel…` followed by
+> `WebSocket connection timeout` and `can't establish a connection to ws://…/pushchannel`,
+> looping on `Scheduling reconnect in 5000ms…`. REST is fine; only the subscription
+> channel is broken.
+>
+> Because `npm run diagnose` probes the PLC directly (bypassing the dev proxy), it
+> will **pass** in this case — a green diagnostic combined with WebSocket errors in
+> the browser points squarely at the dev-server proxy, not the PLC.
+
 ## 📚 Detailed Usage
 
 ### Connection Configuration
@@ -99,7 +346,7 @@ await machine.changeUser('admin', 'admin123');
 const machine = new OpcuaMachine({
   // Server connection
   host: 'localhost',
-  port: 8443,
+  port: 8443,                 // mapp Connect: 8443 for https, 8080 for http
   protocol: 'https',          // 'http' | 'https'
   
   // Authentication
@@ -799,6 +1046,11 @@ Structured error handling
 
 ## 🐛 Troubleshooting
 
+> **Start here:** `npm run diagnose` checks the whole chain (mapp Connect port,
+> REST API authorization, OPC UA port) and — with `--project <path>` — the AS
+> project config. It pinpoints most connection problems in one command and cites
+> the fix. See [Configuring the Automation Studio Project](#-configuring-the-automation-studio-project).
+
 ### Common Issues
 
 **Connection Failed**
@@ -817,6 +1069,20 @@ Structured error handling
 ✅ Enable read group: machine.setReadGroupEnable('default', true)
 ✅ Check connection state: machine.connectionState
 ✅ Verify variable exists on server
+✅ In dev: confirm your proxy forwards WebSockets (ws: true) — see below
+```
+
+**Connects but No Live Updates / WebSocket Timeout (dev server proxy)**
+```
+✅ Add `ws: true` to your dev-server proxy (Vite/webpack) for the /api route —
+   REST works without it, but the /api/1.0/pushchannel WebSocket won't proxy,
+   so subscriptions (and therefore live values) never connect
+✅ Symptom: auth + "OPC UA session created" succeed, then repeating
+   "WebSocket connection timeout" / "can't establish a connection to
+   ws://.../api/1.0/pushchannel" and "Scheduling reconnect in 5000ms…"
+✅ Also set secure: false (self-signed cert) and changeOrigin: true
+✅ npm run diagnose passes here (it probes the PLC directly) → the issue is the
+   dev proxy, not the PLC. See "Dev Server Proxy" above.
 ```
 
 **Performance Issues**
